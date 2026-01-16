@@ -1,0 +1,7 @@
+Flask==3.1.2
+boto3==1.42.28
+Pillow==12.1.0
+ffmpeg-python==0.2.0
+gunicorn==23.0.0
+python-dotenv==1.2.1
+bcrypt==4.1.2

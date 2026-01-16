@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo & Video Storage</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: #f0f8ff;
+        }
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        .gallery-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .gallery-item:hover {
+            transform: scale(1.05);
+        }
+        .gallery-item img, .gallery-item video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        #status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        /* モーダルスタイル */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            position: relative;
+            background-color: white;
+            border-radius: 10px;
+            max-width: 90vw;
+            max-height: 90vh;
+            padding: 20px;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 32px;
+            cursor: pointer;
+            color: #333;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        .modal-close:hover {
+            background-color: #f0f0f0;
+        }
+        .modal-media {
+            margin: 20px 0;
+            max-width: 100%;
+            max-height: 70vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-media img,
+        .modal-media video {
+            max-width: 100%;
+            max-height: 70vh;
+            border-radius: 8px;
+        }
+        .modal-info {
+            margin: 10px 0;
+            text-align: center;
+            color: #666;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn-download,
+        .btn-delete {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        .btn-download {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-download:hover {
+            background-color: #0056b3;
+        }
+        .btn-delete {
+            background-color: #dc3545;
+            color: white;
+        }
+        .btn-delete:hover {
+            background-color: #c82333;
+        }
+        .btn-compress {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-compress:hover {
+            background-color: #218838;
+        }
+        .btn-compress:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .compressed-badge {
+            display: inline-block;
+            background-color: #28a745;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        /* 認証UIスタイル */
+        .auth-container {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 30px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+        .auth-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            transition: color 0.2s;
+        }
+        .auth-tab.active {
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+            margin-bottom: -2px;
+        }
+        .auth-form {
+            display: none;
+        }
+        .auth-form.active {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .btn-auth {
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-auth:hover {
+            background-color: #0056b3;
+        }
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .btn-logout {
+            padding: 8px 16px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-logout:hover {
+            background-color: #c82333;
+        }
+        .error-message {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .main-content {
+            display: none;
+        }
+        .main-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- 認証UI -->
+    <div id="authContainer" class="auth-container">
+        <div class="auth-header">
+            <h1>Photo & Video Storage</h1>
+        </div>
+        <div class="auth-tabs">
+            <button class="auth-tab active" id="loginTab">ログイン</button>
+            <button class="auth-tab" id="registerTab">登録</button>
+        </div>
+        
+        <!-- ログインフォーム -->
+        <form class="auth-form active" id="loginForm">
+            <div class="form-group">
+                <label for="loginUsername">ユーザー名</label>
+                <input type="text" id="loginUsername" required>
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">パスワード</label>
+                <input type="password" id="loginPassword" required>
+            </div>
+            <div id="loginError" class="error-message" style="display: none;"></div>
+            <button type="submit" class="btn-auth">ログイン</button>
+        </form>
+        
+        <!-- 登録フォーム -->
+        <form class="auth-form" id="registerForm">
+            <div class="form-group">
+                <label for="registerUsername">ユーザー名（3文字以上）</label>
+                <input type="text" id="registerUsername" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label for="registerPassword">パスワード（8文字以上）</label>
+                <input type="password" id="registerPassword" required minlength="8">
+            </div>
+            <div class="form-group">
+                <label for="registerEmail">メールアドレス（任意）</label>
+                <input type="email" id="registerEmail">
+            </div>
+            <div id="registerError" class="error-message" style="display: none;"></div>
+            <button type="submit" class="btn-auth">登録</button>
+        </form>
+    </div>
+    
+    <!-- メインコンテンツ -->
+    <div id="mainContent" class="main-content">
+        <div class="user-info">
+            <div>
+                <strong id="currentUsername"></strong> でログイン中
+            </div>
+            <button class="btn-logout" id="btnLogout">ログアウト</button>
+        </div>
+        
+        <h1>Photo & Video Storage</h1>
+    
+    <!-- 設定セクション -->
+    <div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
+        <h2 style="margin-top: 0; font-size: 18px;">設定</h2>
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="settingsAutoCompressCheckbox" style="cursor: pointer;">
+            <span>アップロード時に自動で圧縮する</span>
+        </label>
+    </div>
+    
+    <div class="upload-area" id="uploadArea">
+        <p>ファイルをドラッグ&ドロップまたはクリックして選択</p>
+        <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
+        <div style="margin-top: 15px;">
+            <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <input type="checkbox" id="autoCompressCheckbox" style="cursor: pointer;">
+                <span>アップロード時に自動で圧縮する</span>
+            </label>
+        </div>
+    </div>
+    
+    <div id="status"></div>
+    
+    <div class="gallery" id="gallery"></div>
+    
+    <!-- ポップアップモーダル -->
+    <div class="modal-overlay" id="modalOverlay" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close" id="modalClose">&times;</button>
+            <div class="modal-media" id="modalMedia"></div>
+            <div class="modal-info" id="modalInfo"></div>
+            <div class="modal-actions">
+                <button class="btn-compress" id="btnCompress">圧縮</button>
+                <button class="btn-download" id="btnDownload">ダウンロード</button>
+                <button class="btn-delete" id="btnDelete">削除</button>
+            </div>
+        </div>
+    </div>
+    </div>
+    <!-- mainContent の閉じタグ -->
+    
+    <script>
+        // 認証状態管理
+        let currentUser = null;
+        
+        // DOM要素
+        const authContainer = document.getElementById('authContainer');
+        const mainContent = document.getElementById('mainContent');
+        const loginTab = document.getElementById('loginTab');
+        const registerTab = document.getElementById('registerTab');
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const loginError = document.getElementById('loginError');
+        const registerError = document.getElementById('registerError');
+        const currentUsername = document.getElementById('currentUsername');
+        const btnLogout = document.getElementById('btnLogout');
+        
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const status = document.getElementById('status');
+        const gallery = document.getElementById('gallery');
+        const autoCompressCheckbox = document.getElementById('autoCompressCheckbox');
+        const settingsAutoCompressCheckbox = document.getElementById('settingsAutoCompressCheckbox');
+        
+        const modalOverlay = document.getElementById('modalOverlay');
+        const modalMedia = document.getElementById('modalMedia');
+        const modalInfo = document.getElementById('modalInfo');
+        const modalClose = document.getElementById('modalClose');
+        const btnCompress = document.getElementById('btnCompress');
+        const btnDownload = document.getElementById('btnDownload');
+        const btnDelete = document.getElementById('btnDelete');
+        
+        let currentContent = null; // 現在表示中のコンテンツメタデータ
+        
+        // 認証状態確認
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/me', {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const user = await response.json();
+                    currentUser = user;
+                    showMainContent();
+                } else {
+                    showAuthForm();
+                }
+            } catch (error) {
+                console.error('Auth check error:', error);
+                showAuthForm();
+            }
+        }
+        
+        // UI表示切り替え
+        function showAuthForm() {
+            authContainer.style.display = 'block';
+            mainContent.classList.remove('active');
+            currentUser = null;
+            
+            // セキュリティのため、すべてのフォーム入力をクリア
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('registerUsername').value = '';
+            document.getElementById('registerPassword').value = '';
+            document.getElementById('registerEmail').value = '';
+            
+            // エラーメッセージを非表示
+            loginError.style.display = 'none';
+            registerError.style.display = 'none';
+            
+            // ログインフォームを表示状態にリセット
+            loginTab.classList.add('active');
+            registerTab.classList.remove('active');
+            loginForm.classList.add('active');
+            registerForm.classList.remove('active');
+        }
+        
+        function showMainContent() {
+            authContainer.style.display = 'none';
+            mainContent.classList.add('active');
+            if (currentUser) {
+                currentUsername.textContent = currentUser.username;
+            }
+            loadGallery();
+        }
+        
+        // タブ切り替え
+        loginTab.addEventListener('click', () => {
+            loginTab.classList.add('active');
+            registerTab.classList.remove('active');
+            loginForm.classList.add('active');
+            registerForm.classList.remove('active');
+            loginError.style.display = 'none';
+            registerError.style.display = 'none';
+        });
+        
+        registerTab.addEventListener('click', () => {
+            registerTab.classList.add('active');
+            loginTab.classList.remove('active');
+            registerForm.classList.add('active');
+            loginForm.classList.remove('active');
+            loginError.style.display = 'none';
+            registerError.style.display = 'none';
+        });
+        
+        // ログイン
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loginError.style.display = 'none';
+            
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    currentUser = user;
+                    showMainContent();
+                } else {
+                    const error = await response.json();
+                    loginError.textContent = error.error || 'ログインに失敗しました';
+                    loginError.style.display = 'block';
+                }
+            } catch (error) {
+                loginError.textContent = 'ログインに失敗しました';
+                loginError.style.display = 'block';
+                console.error(error);
+            }
+        });
+        
+        // 登録
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            registerError.style.display = 'none';
+            
+            const username = document.getElementById('registerUsername').value.trim();
+            const password = document.getElementById('registerPassword').value;
+            const email = document.getElementById('registerEmail').value.trim() || null;
+            
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password, email })
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    currentUser = user;
+                    showMainContent();
+                } else {
+                    const error = await response.json();
+                    registerError.textContent = error.error || '登録に失敗しました';
+                    registerError.style.display = 'block';
+                }
+            } catch (error) {
+                registerError.textContent = '登録に失敗しました';
+                registerError.style.display = 'block';
+                console.error(error);
+            }
+        });
+        
+        // ログアウト
+        btnLogout.addEventListener('click', async () => {
+            try {
+                await fetch('/api/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                showAuthForm();
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        });
+        
+        // 自動圧縮設定をlocalStorageから読み込み
+        const savedAutoCompress = localStorage.getItem('autoCompress');
+        const autoCompressValue = savedAutoCompress === 'true';
+        if (savedAutoCompress !== null) {
+            autoCompressCheckbox.checked = autoCompressValue;
+            settingsAutoCompressCheckbox.checked = autoCompressValue;
+        }
+        
+        // 自動圧縮設定をlocalStorageに保存（両方のチェックボックスを同期）
+        function updateAutoCompress(value) {
+            localStorage.setItem('autoCompress', value.toString());
+            autoCompressCheckbox.checked = value;
+            settingsAutoCompressCheckbox.checked = value;
+        }
+        
+        autoCompressCheckbox.addEventListener('change', () => {
+            updateAutoCompress(autoCompressCheckbox.checked);
+        });
+        
+        settingsAutoCompressCheckbox.addEventListener('change', () => {
+            updateAutoCompress(settingsAutoCompressCheckbox.checked);
+        });
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+        
+        async function handleFiles(files) {
+            for (const file of files) {
+                await uploadFile(file);
+            }
+            loadGallery();
+        }
+        
+        async function uploadFile(file) {
+            status.textContent = `アップロード中: ${file.name}...`;
+            
+            try {
+                // 1. 署名付きURL取得
+                const presignResponse = await fetch('/api/presigned-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        filename: file.name,
+                        contentType: file.type
+                    })
+                });
+                
+                if (!presignResponse.ok) {
+                    if (presignResponse.status === 401) {
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error('署名付きURL取得失敗');
+                }
+                
+                const { url, s3_key, content_id } = await presignResponse.json();
+                
+                // 2. S3に直接アップロード
+                const uploadResponse = await fetch(url, {
+                    method: 'PUT',
+                    body: file,
+                    headers: { 'Content-Type': file.type }
+                });
+                
+                if (!uploadResponse.ok) {
+                    throw new Error('S3アップロード失敗');
+                }
+                
+                // 3. メタデータ登録（自動圧縮オプションを含む）
+                const autoCompress = localStorage.getItem('autoCompress') === 'true';
+                const registerResponse = await fetch('/api/register-content', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        content_id: content_id,
+                        filename: file.name,
+                        s3_key: s3_key,
+                        content_type: file.type,
+                        file_size: file.size,
+                        auto_compress: autoCompress
+                    })
+                });
+                
+                if (!registerResponse.ok) {
+                    if (registerResponse.status === 401) {
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error('メタデータ登録失敗');
+                }
+                
+                const registerResult = await registerResponse.json();
+                
+                // バックエンドで自動圧縮が実行された場合
+                if (registerResult.compressed) {
+                    status.textContent = `アップロード・圧縮完了: ${file.name} (${formatFileSize(registerResult.original_size)} → ${formatFileSize(registerResult.compressed_size)})`;
+                } else if (registerResult.compression_error) {
+                    status.textContent = `アップロード完了: ${file.name} (圧縮エラー: ${registerResult.compression_error})`;
+                } else {
+                    status.textContent = `アップロード完了: ${file.name}`;
+                }
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error(error);
+            }
+        }
+        
+        async function loadGallery() {
+            try {
+                const response = await fetch('/api/contents', {
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error('コンテンツ取得失敗');
+                }
+                const { contents } = await response.json();
+                
+                gallery.innerHTML = contents.map((content, index) => {
+                    const itemId = `gallery-item-${index}`;
+                    const safeFilename = escapeHtml(content.filename || '');
+                    const safeContentType = escapeHtml(content.content_type || '');
+                    const contentType = content.content_type || '';
+                    if (contentType.startsWith('image/')) {
+                        return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
+                            <img src="${content.url}" alt="${safeFilename}">
+                        </div>`;
+                    } else if (contentType.startsWith('video/')) {
+                        return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
+                            <video controls><source src="${content.url}" type="${safeContentType}"></video>
+                        </div>`;
+                    }
+                    return '';
+                }).join('');
+                
+                // 各ギャラリーアイテムにクリックイベントを追加
+                contents.forEach((content, index) => {
+                    const item = document.getElementById(`gallery-item-${index}`);
+                    if (item) {
+                        item.addEventListener('click', () => {
+                            showModal(content);
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error('ギャラリー読み込みエラー:', error);
+            }
+        }
+        
+        function showModal(content) {
+            currentContent = content;
+            modalOverlay.style.display = 'flex';
+            
+            const safeFilename = escapeHtml(content.filename || '');
+            const safeContentType = escapeHtml(content.content_type || '');
+            const contentType = content.content_type || '';
+            const isCompressed = content.compressed === true;
+
+            // メディア表示
+            if (contentType.startsWith('image/')) {
+                modalMedia.innerHTML = `<img src="${content.url}" alt="${safeFilename}">`;
+            } else if (contentType.startsWith('video/')) {
+                modalMedia.innerHTML = `<video controls><source src="${content.url}" type="${safeContentType}"></video>`;
+            }
+            
+            // 情報表示（圧縮済みバッジを含む）
+            let infoHtml = `<p><strong>${safeFilename}</strong>`;
+            if (isCompressed) {
+                infoHtml += `<span class="compressed-badge">圧縮済み</span>`;
+            }
+            infoHtml += `</p><p>${formatFileSize(content.file_size)}</p>`;
+            modalInfo.innerHTML = infoHtml;
+            
+            // 圧縮ボタンの状態を更新
+            if (contentType.startsWith('video/')) {
+                btnCompress.disabled = true;
+                btnCompress.textContent = '動画は圧縮できません';
+            } else if (isCompressed) {
+                btnCompress.disabled = true;
+                btnCompress.textContent = '圧縮済み';
+            } else {
+                btnCompress.disabled = false;
+                btnCompress.textContent = '圧縮';
+            }
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            if (!Number.isFinite(bytes) || bytes < 0) return '';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const rawIndex = Math.log(bytes) / Math.log(k);
+            const i = Math.min(sizes.length - 1, Math.max(0, Math.floor(rawIndex)));
+            const value = bytes / Math.pow(k, i);
+            return Math.round(value * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function closeModal() {
+            modalOverlay.style.display = 'none';
+            currentContent = null;
+        }
+        
+        // 削除機能
+        btnDelete.addEventListener('click', async () => {
+            if (!currentContent) return;
+            
+            const safeFilename = escapeHtml(currentContent.filename || '');
+            if (!confirm(`「${safeFilename}」を削除しますか？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/contents/${currentContent.content_id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        closeModal();
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error('削除に失敗しました');
+                }
+                
+                status.textContent = `削除完了: ${safeFilename}`;
+                closeModal();
+                loadGallery();
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error(error);
+            }
+        });
+        
+        // 圧縮機能
+        btnCompress.addEventListener('click', async () => {
+            if (!currentContent || currentContent.compressed === true) return;
+            
+            const safeFilename = escapeHtml(currentContent.filename || '');
+            if (!confirm(`「${safeFilename}」を圧縮しますか？\n元のファイルは軽量版で置き換えられます。`)) {
+                return;
+            }
+            
+            // ボタンを無効化して進捗表示
+            btnCompress.disabled = true;
+            const originalText = btnCompress.textContent;
+            btnCompress.textContent = '圧縮中...';
+            status.textContent = `圧縮中: ${safeFilename}...`;
+            
+            try {
+                const response = await fetch(`/api/contents/${currentContent.content_id}/compress`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        closeModal();
+                        showAuthForm();
+                        // エラー時はボタンを再有効化
+                        btnCompress.disabled = false;
+                        btnCompress.textContent = originalText;
+                        return;
+                    }
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '圧縮に失敗しました');
+                }
+                
+                const result = await response.json();
+                status.textContent = `圧縮完了: ${safeFilename} (${formatFileSize(result.original_size)} → ${formatFileSize(result.compressed_size)})`;
+                
+                // ギャラリーを再読み込みしてモーダルを閉じる
+                closeModal();
+                loadGallery();
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error(error);
+                // エラー時はボタンを再有効化
+                btnCompress.disabled = false;
+                btnCompress.textContent = originalText;
+            }
+        });
+        
+        // ダウンロード機能
+        btnDownload.addEventListener('click', async () => {
+            if (!currentContent) return;
+            
+            try {
+                const response = await fetch(`/api/contents/${currentContent.content_id}/download`, {
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        closeModal();
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error('ダウンロードURL取得に失敗しました');
+                }
+                
+                const { url, filename } = await response.json();
+                
+                // ダウンロード実行
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                const safeFilename = escapeHtml(filename || '');
+                status.textContent = `ダウンロード開始: ${safeFilename}`;
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error(error);
+            }
+        });
+        
+        // モーダルを閉じる機能
+        modalClose.addEventListener('click', closeModal);
+        
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                closeModal();
+            }
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modalOverlay.style.display === 'flex') {
+                closeModal();
+            }
+        });
+        
+        // 初期読み込み
+        checkAuth();
+    </script>
+</body>
+</html>

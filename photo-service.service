@@ -1,0 +1,16 @@
+[Unit]
+Description=Photo Service
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/photo-service
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/opt/photo-service/.env
+ExecStart=/usr/local/bin/gunicorn -w 4 -b 0.0.0.0:8000 app:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
