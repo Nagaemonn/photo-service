@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, session
 from functools import wraps
 import boto3
+from botocore.exceptions import ClientError
 import uuid
 from datetime import datetime, timedelta
 import os
@@ -295,6 +296,118 @@ def get_current_user():
         'username': username
     }), 200
 
+@app.route('/api/users/me', methods=['DELETE'])
+@require_auth
+def delete_user():
+    """ユーザーアカウント削除（全コンテンツも削除）"""
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    errors = []
+    
+    try:
+        # ユーザーの全コンテンツを取得（ページネーション対応）
+        all_contents = []
+        last_evaluated_key = None
+        
+        while True:
+            query_params = {
+                'IndexName': 'user-contents-index',
+                'KeyConditionExpression': 'user_id = :uid',
+                'ExpressionAttributeValues': {':uid': user_id}
+            }
+            
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = contents_table.query(**query_params)
+            all_contents.extend(response['Items'])
+            
+            # 次のページがあるかチェック
+            last_evaluated_key = response.get('LastEvaluatedKey')
+            if not last_evaluated_key:
+                break
+        
+        # 各コンテンツのS3オブジェクトとDynamoDBメタデータを削除
+        # エラーが発生しても可能な限りすべての削除を試行する
+        s3_errors = []
+        db_errors = []
+        
+        for content in all_contents:
+            s3_key = content.get('s3_key')
+            if s3_key:
+                try:
+                    s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                except Exception as s3_error:
+                    s3_errors.append(f"S3 deletion failed for {s3_key}: {str(s3_error)}")
+                    print(f"Error: S3 object deletion failed for {s3_key}: {s3_error}")
+            
+            # DynamoDBからメタデータを削除
+            try:
+                contents_table.delete_item(
+                    Key={
+                        'content_id': content['content_id'],
+                        'upload_date': content['upload_date']
+                    }
+                )
+            except Exception as db_error:
+                db_errors.append(f"DynamoDB content deletion failed for {content.get('content_id')}: {str(db_error)}")
+                print(f"Error: DynamoDB content deletion failed for {content.get('content_id')}: {db_error}")
+        
+        # ユーザーをDynamoDBから削除（コンテンツ削除のエラーがあっても実行）
+        # これにより、部分的に削除された状態でユーザーレコードが残ることを防ぐ
+        user_deletion_error = None
+        user_deletion_succeeded = False
+        try:
+            users_table.delete_item(
+                Key={'user_id': user_id}
+            )
+            user_deletion_succeeded = True
+        except Exception as db_error:
+            user_deletion_error = f"DynamoDB user deletion failed for {user_id}: {str(db_error)}"
+            print(f"Error: {user_deletion_error}")
+        
+        # エラーを収集
+        if s3_errors:
+            errors.extend(s3_errors)
+        if db_errors:
+            errors.extend(db_errors)
+        if user_deletion_error:
+            errors.append(user_deletion_error)
+        
+        # ユーザーレコードの削除が成功した場合のみセッションをクリア
+        # これにより、削除が失敗した場合でもクライアントは再試行できる
+        if user_deletion_succeeded:
+            session.clear()
+        
+        # エラーが発生した場合は、詳細を含むエラーレスポンスを返す
+        if errors:
+            # ユーザーレコードの削除が失敗した場合は、セッションを保持してエラーを返す
+            if user_deletion_error:
+                return jsonify({
+                    'error': 'User deletion failed',
+                    'details': errors,
+                    'note': 'User record deletion failed. Session preserved for retry. Some content may have been deleted.'
+                }), 500
+            else:
+                # コンテンツ削除のエラーのみ（ユーザーレコードは削除済み、セッションもクリア済み）
+                # セッションがクリアされているため、401を返してフロントエンドにログアウトを促す
+                return jsonify({
+                    'error': 'User deletion completed with some content deletion errors',
+                    'details': errors,
+                    'note': 'User record deleted and session cleared, but some content may remain. Please contact support.',
+                    'session_cleared': True
+                }), 401
+        
+        # すべて成功した場合
+        return jsonify({'status': 'success'}), 200
+        
+    except Exception as e:
+        error_msg = f"User deletion error: {str(e)}"
+        print(f"Error: {error_msg}")
+        return jsonify({'error': 'User deletion failed', 'details': [error_msg]}), 500
+
 @app.route('/api/presigned-url', methods=['POST'])
 @require_auth
 def generate_presigned_url():
@@ -333,6 +446,15 @@ def register_content():
     data = request.get_json()
     user_id = session['user_id']  # セッションから取得
     
+    # 必須フィールドのバリデーション
+    required_fields = ['filename', 'content_id', 's3_key', 'content_type', 'file_size']
+    missing_fields = [field for field in required_fields if field not in data or data[field] is None]
+    if missing_fields:
+        return jsonify({'error': f'Missing required fields: {", ".join(missing_fields)}'}), 400
+    
+    filename = data['filename']
+    s3_key = data['s3_key']
+    
     upload_date = datetime.utcnow().isoformat()
     item = {
         'content_id': data['content_id'],
@@ -345,7 +467,93 @@ def register_content():
         'compressed': False
     }
     
-    contents_table.put_item(Item=item)
+    # 重複チェックと挿入をアトミックに実行
+    # 早期検出のため、GSIで重複をチェック（非アトミックだが、ほとんどのケースで有効）
+    response = contents_table.query(
+        IndexName='user-contents-index',
+        KeyConditionExpression='user_id = :uid',
+        FilterExpression='filename = :fn',
+        ExpressionAttributeValues={
+            ':uid': user_id,
+            ':fn': filename
+        }
+    )
+    
+    if response['Items']:
+        # 重複している場合は、既にアップロードされたS3オブジェクトを削除してから409 Conflictを返す
+        try:
+            s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+        except Exception as s3_error:
+            # S3削除が失敗してもログに記録して続行（孤立オブジェクトはライフサイクルポリシーで後から削除される）
+            print(f"Warning: Failed to delete orphaned S3 object {s3_key} after duplicate detection: {s3_error}")
+        
+        return jsonify({'error': 'File with the same name already exists'}), 409
+    
+    # アトミックな挿入: content_idが存在しないことを条件として挿入
+    # これにより、同じcontent_idでの重複挿入を防ぐ
+    # 注意: filenameの重複はGSIチェックで検出しているが、完全なアトミック性は保証されない
+    # （スキーマ上、filenameは主キーではないため、ConditionExpressionで直接チェックできない）
+    from boto3.dynamodb.conditions import Attr
+    try:
+        contents_table.put_item(
+            Item=item,
+            ConditionExpression=Attr('content_id').not_exists()
+        )
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+        if error_code == 'ConditionalCheckFailedException':
+            # content_idが既に存在する場合（理論的には発生しないが、念のため）
+            try:
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+            except Exception as s3_error:
+                print(f"Warning: Failed to delete orphaned S3 object {s3_key} after conditional check failure: {s3_error}")
+            return jsonify({'error': 'Content with the same ID already exists'}), 409
+        else:
+            # その他のエラー
+            raise
+    
+    # レースコンディション対策: 挿入後に再度重複チェックを実行
+    # 挿入直後に同じファイル名のアイテムが複数存在するか確認
+    # もし重複が見つかった場合、後から挿入した方（現在のアイテム）を削除
+    post_insert_check = contents_table.query(
+        IndexName='user-contents-index',
+        KeyConditionExpression='user_id = :uid',
+        FilterExpression='filename = :fn',
+        ExpressionAttributeValues={
+            ':uid': user_id,
+            ':fn': filename
+        }
+    )
+    
+    # 同じファイル名のアイテムが2つ以上存在する場合（重複が発生した場合）
+    if len(post_insert_check['Items']) > 1:
+        # 現在のアイテム（最後に挿入されたもの）を削除
+        # upload_dateでソートして、最新のものを削除
+        items_sorted = sorted(post_insert_check['Items'], key=lambda x: x['upload_date'], reverse=True)
+        if items_sorted[0]['content_id'] == data['content_id']:
+            # 現在のアイテムが最新の場合、削除
+            try:
+                contents_table.delete_item(
+                    Key={
+                        'content_id': data['content_id'],
+                        'upload_date': upload_date
+                    }
+                )
+                # S3オブジェクトも削除
+                try:
+                    s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                except Exception as s3_error:
+                    print(f"Warning: Failed to delete orphaned S3 object {s3_key} after duplicate detection: {s3_error}")
+                
+                return jsonify({'error': 'File with the same name already exists'}), 409
+            except Exception as delete_error:
+                # 削除に失敗した場合はログに記録（既に挿入されているため）
+                print(f"Warning: Failed to delete duplicate item {data['content_id']}: {delete_error}")
+                # エラーを返すが、データは残る（手動で修正が必要）
+                return jsonify({
+                    'error': 'File with the same name already exists',
+                    'note': 'Duplicate detected after insertion. Manual cleanup may be required.'
+                }), 409
     
     # 自動圧縮が有効な場合、圧縮処理を実行
     auto_compress = data.get('auto_compress', False)

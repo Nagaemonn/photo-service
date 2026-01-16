@@ -35,14 +35,20 @@
             overflow: hidden;
             cursor: pointer;
             transition: transform 0.2s;
+            display: flex;
+            flex-direction: column;
+            min-height: 200px;
+            aspect-ratio: 1;
         }
         .gallery-item:hover {
             transform: scale(1.05);
         }
         .gallery-item img, .gallery-item video {
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
             display: block;
+            flex: 1;
         }
         #status {
             padding: 10px;
@@ -253,6 +259,19 @@
         .btn-logout:hover {
             background-color: #c82333;
         }
+        .btn-delete-account {
+            padding: 8px 16px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .btn-delete-account:hover {
+            background-color: #5a6268;
+        }
         .error-message {
             color: #dc3545;
             font-size: 14px;
@@ -316,7 +335,10 @@
             <div>
                 <strong id="currentUsername"></strong> でログイン中
             </div>
-            <button class="btn-logout" id="btnLogout">ログアウト</button>
+            <div>
+                <button class="btn-logout" id="btnLogout">ログアウト</button>
+                <button class="btn-delete-account" id="btnDeleteAccount">アカウント削除</button>
+            </div>
         </div>
         
         <h1>Photo & Video Storage</h1>
@@ -376,6 +398,7 @@
         const registerError = document.getElementById('registerError');
         const currentUsername = document.getElementById('currentUsername');
         const btnLogout = document.getElementById('btnLogout');
+        const btnDeleteAccount = document.getElementById('btnDeleteAccount');
         
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -543,6 +566,51 @@
             }
         });
         
+        // アカウント削除
+        btnDeleteAccount.addEventListener('click', async () => {
+            if (!currentUser) return;
+            
+            const safeUsername = escapeHtml(currentUser.username || '');
+            const confirmMessage = `「${safeUsername}」のアカウントを削除しますか？\n\nこの操作は取り消せません。\nアップロードしたすべての画像・動画も削除されます。`;
+            
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            // 二重確認
+            if (!confirm('本当に削除しますか？この操作は取り消せません。')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/users/me', {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // セッションがクリアされた場合はログアウト
+                        showAuthForm();
+                        return;
+                    }
+                    const error = await response.json();
+                    // セッションがクリアされたことを示すフラグがある場合もログアウト
+                    if (error.session_cleared) {
+                        showAuthForm();
+                        return;
+                    }
+                    throw new Error(error.error || 'アカウント削除に失敗しました');
+                }
+                
+                status.textContent = 'アカウントを削除しました';
+                showAuthForm();
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error('Account deletion error:', error);
+            }
+        });
+        
         // 自動圧縮設定をlocalStorageから読み込み
         const savedAutoCompress = localStorage.getItem('autoCompress');
         const autoCompressValue = savedAutoCompress === 'true';
@@ -558,13 +626,27 @@
             settingsAutoCompressCheckbox.checked = value;
         }
         
-        autoCompressCheckbox.addEventListener('change', () => {
+        // チェックボックス自体のクリックイベントで伝播を防止（changeイベントより先に発火するため）
+        autoCompressCheckbox.addEventListener('click', (e) => {
+            e.stopPropagation(); // 親要素へのイベント伝播を防止
+        });
+        
+        autoCompressCheckbox.addEventListener('change', (e) => {
+            e.stopPropagation(); // 親要素へのイベント伝播を防止
             updateAutoCompress(autoCompressCheckbox.checked);
         });
         
         settingsAutoCompressCheckbox.addEventListener('change', () => {
             updateAutoCompress(settingsAutoCompressCheckbox.checked);
         });
+        
+        // チェックボックスのラベルクリック時もイベント伝播を防止
+        const autoCompressLabel = autoCompressCheckbox.closest('label');
+        if (autoCompressLabel) {
+            autoCompressLabel.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
 
         function escapeHtml(str) {
             if (!str) return '';
@@ -656,6 +738,10 @@
                     if (registerResponse.status === 401) {
                         showAuthForm();
                         return;
+                    }
+                    if (registerResponse.status === 409) {
+                        const error = await registerResponse.json();
+                        throw new Error(error.error || '同じファイル名のファイルが既に存在します');
                     }
                     throw new Error('メタデータ登録失敗');
                 }
