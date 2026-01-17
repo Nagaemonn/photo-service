@@ -10,7 +10,7 @@ import zipfile
 import threading
 import time
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageOps
 import ffmpeg
 import bcrypt
 
@@ -251,6 +251,9 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
 
         # 画像圧縮（Pillow）
         img = Image.open(temp_input_path)
+        
+        # EXIF Orientation情報を適用して画像を正しい向きに回転
+        img = ImageOps.exif_transpose(img)
         
         # RGBに変換（PNGの透過情報などは失われる）
         if img.mode in ('RGBA', 'LA', 'P'):
