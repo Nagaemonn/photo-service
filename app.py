@@ -132,6 +132,47 @@ contents_table = dynamodb.Table('contents')
 users_table = dynamodb.Table('users')
 
 
+def validate_username(username: str) -> tuple[bool, str | None]:
+    """
+    ユーザー名のバリデーション
+    戻り値: (is_valid, error_message)
+    """
+    if not username:
+        return False, 'Username is required'
+    if len(username) < 3:
+        return False, 'Username must be at least 3 characters'
+    if len(username) > 64:
+        return False, 'Username must be at most 64 characters'
+    return True, None
+
+
+def validate_password(password: str) -> tuple[bool, str | None, str | None]:
+    """
+    パスワードのバリデーション
+    戻り値: (is_valid, error_message, warning_message)
+    warning_message: 推奨事項（エラーではない）
+    """
+    if not password:
+        return False, 'Password is required', None
+    if len(password) < 8:
+        return False, 'Password must be at least 8 characters', None
+    if len(password) > 64:
+        return False, 'Password must be at most 64 characters', None
+    
+    # 英数字記号が利用可能であることを確認
+    # 英字、数字、記号のいずれかが含まれているかチェック
+    has_letter = any(c.isalpha() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_symbol = any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in password)
+    
+    # すべて混合を推奨（必須ではない）
+    warning = None
+    if not (has_letter and has_digit and has_symbol):
+        warning = 'For better security, it is recommended to use a combination of letters, numbers, and symbols'
+    
+    return True, None, warning
+
+
 def hash_password(password: str) -> str:
     """パスワードをbcryptでハッシュ化"""
     salt = bcrypt.gensalt()
@@ -361,14 +402,13 @@ def register():
         email = email_value.strip() if email_value and isinstance(email_value, str) else None
         
         # バリデーション
-        if not username:
-            return jsonify({'error': 'Username is required'}), 400
-        if not password:
-            return jsonify({'error': 'Password is required'}), 400
-        if len(password) < 8:
-            return jsonify({'error': 'Password must be at least 8 characters'}), 400
-        if len(username) < 3:
-            return jsonify({'error': 'Username must be at least 3 characters'}), 400
+        username_valid, username_error = validate_username(username)
+        if not username_valid:
+            return jsonify({'error': username_error}), 400
+        
+        password_valid, password_error, password_warning = validate_password(password)
+        if not password_valid:
+            return jsonify({'error': password_error}), 400
         
         # ユーザー名の重複チェック
         response = users_table.scan(
@@ -396,10 +436,16 @@ def register():
         session['user_id'] = user_id
         session['username'] = username
         
-        return jsonify({
+        response_data = {
             'user_id': user_id,
             'username': username
-        }), 201
+        }
+        
+        # パスワードの警告メッセージがある場合はレスポンスに含める
+        if password_warning:
+            response_data['warning'] = password_warning
+        
+        return jsonify(response_data), 201
         
     except Exception as e:
         print(f"Registration error: {str(e)}")
