@@ -4,24 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Photo & Video Storage</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         body {
             font-family: Arial, sans-serif;
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
+            min-height: 100vh;
+            position: relative;
         }
-        .upload-area {
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            margin: 20px 0;
-            cursor: pointer;
-        }
-        .upload-area.dragover {
-            border-color: #007bff;
+        body.drag-over {
             background-color: #f0f8ff;
+        }
+        body.drag-over::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 123, 255, 0.1);
+            border: 3px dashed #007bff;
+            z-index: 999;
+            pointer-events: none;
         }
         .gallery {
             display: grid;
@@ -49,6 +55,9 @@
             object-fit: cover;
             display: block;
             flex: 1;
+        }
+        .gallery-item img {
+            loading: lazy;
         }
         #status {
             padding: 10px;
@@ -125,37 +134,84 @@
             margin-top: 20px;
         }
         .btn-download,
-        .btn-delete {
-            padding: 10px 20px;
+        .btn-delete,
+        .btn-compress,
+        .btn-icon {
+            padding: 10px;
             border: none;
-            border-radius: 5px;
+            border-radius: 50%;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 20px;
             transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background-color: transparent;
+            color: #333;
+        }
+        .btn-download:hover,
+        .btn-delete:hover,
+        .btn-compress:hover,
+        .btn-icon:hover {
+            background-color: #f0f0f0;
         }
         .btn-download {
-            background-color: #007bff;
-            color: white;
+            color: #007bff;
         }
         .btn-download:hover {
-            background-color: #0056b3;
+            background-color: #e7f3ff;
         }
         .btn-delete {
-            background-color: #dc3545;
-            color: white;
+            color: #dc3545;
         }
         .btn-delete:hover {
-            background-color: #c82333;
+            background-color: #ffe7e7;
         }
         .btn-compress {
-            background-color: #28a745;
-            color: white;
+            color: #28a745;
         }
         .btn-compress:hover {
-            background-color: #218838;
+            background-color: #e7f5e7;
         }
         .btn-compress:disabled {
-            background-color: #6c757d;
+            color: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .btn-compress:disabled:hover {
+            background-color: transparent;
+        }
+        .modal-navigation {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 24px;
+            color: #333;
+            transition: background-color 0.2s;
+            z-index: 1001;
+        }
+        .modal-navigation:hover {
+            background: rgba(255, 255, 255, 1);
+        }
+        .modal-navigation.prev {
+            left: 20px;
+        }
+        .modal-navigation.next {
+            right: 20px;
+        }
+        .modal-navigation:disabled {
+            opacity: 0.3;
             cursor: not-allowed;
         }
         .compressed-badge {
@@ -246,6 +302,66 @@
             padding: 10px;
             background-color: #f8f9fa;
             border-radius: 5px;
+            position: relative;
+        }
+        .settings-menu {
+            position: relative;
+        }
+        .settings-menu-button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        .settings-menu-button:hover {
+            background-color: #e9ecef;
+        }
+        .settings-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 8px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            min-width: 200px;
+            display: none;
+            z-index: 100;
+        }
+        .settings-dropdown.active {
+            display: block;
+        }
+        .settings-dropdown-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-dropdown-item:last-child {
+            border-bottom: none;
+        }
+        .settings-dropdown-item:hover {
+            background-color: #f8f9fa;
+        }
+        .settings-dropdown-item label {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            margin: 0;
+        }
+        .settings-dropdown-item input[type="checkbox"] {
+            cursor: pointer;
         }
         .btn-logout {
             padding: 8px 16px;
@@ -335,33 +451,34 @@
             <div>
                 <strong id="currentUsername"></strong> でログイン中
             </div>
-            <div>
-                <button class="btn-logout" id="btnLogout">ログアウト</button>
-                <button class="btn-delete-account" id="btnDeleteAccount">アカウント削除</button>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="settings-menu">
+                    <button class="settings-menu-button" id="settingsMenuButton" aria-label="設定メニュー">
+                        <span class="material-icons">more_vert</span>
+                    </button>
+                    <div class="settings-dropdown" id="settingsDropdown">
+                        <div class="settings-dropdown-item">
+                            <label>
+                                <input type="checkbox" id="settingsAutoCompressCheckbox">
+                                <span>アップロード時に自動で圧縮する</span>
+                            </label>
+                        </div>
+                        <div class="settings-dropdown-item" id="settingsLogoutItem" style="cursor: pointer;">
+                            <span class="material-icons" style="font-size: 18px;">logout</span>
+                            <span>ログアウト</span>
+                        </div>
+                        <div class="settings-dropdown-item" id="settingsDeleteAccountItem" style="cursor: pointer; color: #dc3545;">
+                            <span class="material-icons" style="font-size: 18px;">delete_forever</span>
+                            <span>アカウント削除</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
         <h1>Photo & Video Storage</h1>
     
-    <!-- 設定セクション -->
-    <div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
-        <h2 style="margin-top: 0; font-size: 18px;">設定</h2>
-        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
-            <input type="checkbox" id="settingsAutoCompressCheckbox" style="cursor: pointer;">
-            <span>アップロード時に自動で圧縮する</span>
-        </label>
-    </div>
-    
-    <div class="upload-area" id="uploadArea">
-        <p>ファイルをドラッグ&ドロップまたはクリックして選択</p>
-        <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
-        <div style="margin-top: 15px;">
-            <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <input type="checkbox" id="autoCompressCheckbox" style="cursor: pointer;">
-                <span>アップロード時に自動で圧縮する</span>
-            </label>
-        </div>
-    </div>
+    <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
     
     <div id="status"></div>
     
@@ -369,14 +486,28 @@
     
     <!-- ポップアップモーダル -->
     <div class="modal-overlay" id="modalOverlay" style="display: none;">
+        <button class="modal-navigation prev" id="modalPrev" aria-label="前のメディア">
+            <span class="material-icons">chevron_left</span>
+        </button>
+        <button class="modal-navigation next" id="modalNext" aria-label="次のメディア">
+            <span class="material-icons">chevron_right</span>
+        </button>
         <div class="modal-content">
-            <button class="modal-close" id="modalClose">&times;</button>
+            <button class="modal-close" id="modalClose" aria-label="閉じる">
+                <span class="material-icons">close</span>
+            </button>
             <div class="modal-media" id="modalMedia"></div>
             <div class="modal-info" id="modalInfo"></div>
             <div class="modal-actions">
-                <button class="btn-compress" id="btnCompress">圧縮</button>
-                <button class="btn-download" id="btnDownload">ダウンロード</button>
-                <button class="btn-delete" id="btnDelete">削除</button>
+                <button class="btn-compress btn-icon" id="btnCompress" aria-label="圧縮">
+                    <span class="material-icons">compress</span>
+                </button>
+                <button class="btn-download btn-icon" id="btnDownload" aria-label="ダウンロード">
+                    <span class="material-icons">download</span>
+                </button>
+                <button class="btn-delete btn-icon" id="btnDelete" aria-label="削除">
+                    <span class="material-icons">delete</span>
+                </button>
             </div>
         </div>
     </div>
@@ -397,25 +528,29 @@
         const loginError = document.getElementById('loginError');
         const registerError = document.getElementById('registerError');
         const currentUsername = document.getElementById('currentUsername');
-        const btnLogout = document.getElementById('btnLogout');
-        const btnDeleteAccount = document.getElementById('btnDeleteAccount');
+        const settingsMenuButton = document.getElementById('settingsMenuButton');
+        const settingsDropdown = document.getElementById('settingsDropdown');
+        const settingsLogoutItem = document.getElementById('settingsLogoutItem');
+        const settingsDeleteAccountItem = document.getElementById('settingsDeleteAccountItem');
         
-        const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const status = document.getElementById('status');
         const gallery = document.getElementById('gallery');
-        const autoCompressCheckbox = document.getElementById('autoCompressCheckbox');
         const settingsAutoCompressCheckbox = document.getElementById('settingsAutoCompressCheckbox');
         
         const modalOverlay = document.getElementById('modalOverlay');
         const modalMedia = document.getElementById('modalMedia');
         const modalInfo = document.getElementById('modalInfo');
         const modalClose = document.getElementById('modalClose');
+        const modalPrev = document.getElementById('modalPrev');
+        const modalNext = document.getElementById('modalNext');
         const btnCompress = document.getElementById('btnCompress');
         const btnDownload = document.getElementById('btnDownload');
         const btnDelete = document.getElementById('btnDelete');
         
         let currentContent = null; // 現在表示中のコンテンツメタデータ
+        let allContents = []; // 全コンテンツリスト（モーダルナビゲーション用）
+        let currentContentIndex = -1; // 現在表示中のコンテンツのインデックス
         
         // 認証状態確認
         async function checkAuth() {
@@ -553,8 +688,22 @@
             }
         });
         
-        // ログアウト
-        btnLogout.addEventListener('click', async () => {
+        // 設定メニューの開閉
+        settingsMenuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsDropdown.classList.toggle('active');
+        });
+        
+        // メニュー外クリックで閉じる
+        document.addEventListener('click', (e) => {
+            if (!settingsMenuButton.contains(e.target) && !settingsDropdown.contains(e.target)) {
+                settingsDropdown.classList.remove('active');
+            }
+        });
+        
+        // 設定メニュー内のログアウト・アカウント削除
+        settingsLogoutItem.addEventListener('click', async () => {
+            settingsDropdown.classList.remove('active');
             try {
                 await fetch('/api/logout', {
                     method: 'POST',
@@ -566,8 +715,8 @@
             }
         });
         
-        // アカウント削除
-        btnDeleteAccount.addEventListener('click', async () => {
+        settingsDeleteAccountItem.addEventListener('click', async () => {
+            settingsDropdown.classList.remove('active');
             if (!currentUser) return;
             
             const safeUsername = escapeHtml(currentUser.username || '');
@@ -590,12 +739,10 @@
                 
                 if (!response.ok) {
                     if (response.status === 401) {
-                        // セッションがクリアされた場合はログアウト
                         showAuthForm();
                         return;
                     }
                     const error = await response.json();
-                    // セッションがクリアされたことを示すフラグがある場合もログアウト
                     if (error.session_cleared) {
                         showAuthForm();
                         return;
@@ -615,38 +762,13 @@
         const savedAutoCompress = localStorage.getItem('autoCompress');
         const autoCompressValue = savedAutoCompress === 'true';
         if (savedAutoCompress !== null) {
-            autoCompressCheckbox.checked = autoCompressValue;
             settingsAutoCompressCheckbox.checked = autoCompressValue;
         }
         
-        // 自動圧縮設定をlocalStorageに保存（両方のチェックボックスを同期）
-        function updateAutoCompress(value) {
-            localStorage.setItem('autoCompress', value.toString());
-            autoCompressCheckbox.checked = value;
-            settingsAutoCompressCheckbox.checked = value;
-        }
-        
-        // チェックボックス自体のクリックイベントで伝播を防止（changeイベントより先に発火するため）
-        autoCompressCheckbox.addEventListener('click', (e) => {
-            e.stopPropagation(); // 親要素へのイベント伝播を防止
-        });
-        
-        autoCompressCheckbox.addEventListener('change', (e) => {
-            e.stopPropagation(); // 親要素へのイベント伝播を防止
-            updateAutoCompress(autoCompressCheckbox.checked);
-        });
-        
+        // 自動圧縮設定をlocalStorageに保存
         settingsAutoCompressCheckbox.addEventListener('change', () => {
-            updateAutoCompress(settingsAutoCompressCheckbox.checked);
+            localStorage.setItem('autoCompress', settingsAutoCompressCheckbox.checked.toString());
         });
-        
-        // チェックボックスのラベルクリック時もイベント伝播を防止
-        const autoCompressLabel = autoCompressCheckbox.closest('label');
-        if (autoCompressLabel) {
-            autoCompressLabel.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-        }
 
         function escapeHtml(str) {
             if (!str) return '';
@@ -658,19 +780,44 @@
                 .replace(/'/g, '&#39;');
         }
         
-        uploadArea.addEventListener('click', () => fileInput.click());
-        uploadArea.addEventListener('dragover', (e) => {
+        // ページ全体ドロップ対応
+        document.body.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadArea.classList.add('dragover');
+            e.stopPropagation();
+            if (mainContent.classList.contains('active')) {
+                document.body.classList.add('drag-over');
+            }
         });
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        uploadArea.addEventListener('drop', (e) => {
+        
+        document.body.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
+            e.stopPropagation();
+            // 子要素への移動時はdrag-overを維持
+            if (!e.currentTarget.contains(e.relatedTarget)) {
+                document.body.classList.remove('drag-over');
+            }
         });
+        
+        document.body.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            document.body.classList.remove('drag-over');
+            if (mainContent.classList.contains('active') && e.dataTransfer.files.length > 0) {
+                handleFiles(e.dataTransfer.files);
+            }
+        });
+        
+        // ファイル選択（クリックでトリガー可能にするため、必要に応じて実装）
+        // 例: ダブルクリックでファイル選択ダイアログを開く
+        document.body.addEventListener('dblclick', (e) => {
+            if (mainContent.classList.contains('active') && 
+                !e.target.closest('.modal-overlay') && 
+                !e.target.closest('.settings-menu') &&
+                !e.target.closest('.gallery-item')) {
+                fileInput.click();
+            }
+        });
+        
         fileInput.addEventListener('change', (e) => {
             handleFiles(e.target.files);
         });
@@ -776,6 +923,27 @@
                 }
                 const { contents } = await response.json();
                 
+                // モーダルが開いている場合、現在表示中のコンテンツのインデックスを更新
+                const wasModalOpen = modalOverlay.style.display === 'flex';
+                const previousContentId = currentContent ? currentContent.content_id : null;
+                
+                allContents = contents; // モーダルナビゲーション用に保存
+                
+                // モーダルが開いている場合、現在表示中のコンテンツの新しいインデックスを見つけて更新
+                if (wasModalOpen && previousContentId) {
+                    const newIndex = allContents.findIndex(c => c.content_id === previousContentId);
+                    if (newIndex !== -1) {
+                        currentContentIndex = newIndex;
+                        // 現在表示中のコンテンツも更新（URLなどが変更されている可能性があるため）
+                        currentContent = allContents[newIndex];
+                        // モーダルの表示を更新
+                        showModal(currentContent, newIndex);
+                    } else {
+                        // 現在表示中のコンテンツが削除された場合、モーダルを閉じる
+                        closeModal();
+                    }
+                }
+                
                 gallery.innerHTML = contents.map((content, index) => {
                     const itemId = `gallery-item-${index}`;
                     const safeFilename = escapeHtml(content.filename || '');
@@ -783,7 +951,7 @@
                     const contentType = content.content_type || '';
                     if (contentType.startsWith('image/')) {
                         return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
-                            <img src="${content.url}" alt="${safeFilename}">
+                            <img src="${content.url}" alt="${safeFilename}" loading="lazy">
                         </div>`;
                     } else if (contentType.startsWith('video/')) {
                         return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
@@ -798,7 +966,7 @@
                     const item = document.getElementById(`gallery-item-${index}`);
                     if (item) {
                         item.addEventListener('click', () => {
-                            showModal(content);
+                            showModal(content, index);
                         });
                     }
                 });
@@ -807,8 +975,9 @@
             }
         }
         
-        function showModal(content) {
+        function showModal(content, index) {
             currentContent = content;
+            currentContentIndex = index;
             modalOverlay.style.display = 'flex';
             
             const safeFilename = escapeHtml(content.filename || '');
@@ -831,18 +1000,33 @@
             infoHtml += `</p><p>${formatFileSize(content.file_size)}</p>`;
             modalInfo.innerHTML = infoHtml;
             
+            // ナビゲーションボタンの状態を更新
+            modalPrev.disabled = currentContentIndex <= 0;
+            modalNext.disabled = currentContentIndex >= allContents.length - 1;
+            
             // 圧縮ボタンの状態を更新
             if (contentType.startsWith('video/')) {
                 btnCompress.disabled = true;
-                btnCompress.textContent = '動画は圧縮できません';
+                btnCompress.setAttribute('aria-label', '動画は圧縮できません');
             } else if (isCompressed) {
                 btnCompress.disabled = true;
-                btnCompress.textContent = '圧縮済み';
+                btnCompress.setAttribute('aria-label', '圧縮済み');
             } else {
                 btnCompress.disabled = false;
-                btnCompress.textContent = '圧縮';
+                btnCompress.setAttribute('aria-label', '圧縮');
             }
         }
+        
+        function navigateModal(direction) {
+            if (direction === 'prev' && currentContentIndex > 0) {
+                showModal(allContents[currentContentIndex - 1], currentContentIndex - 1);
+            } else if (direction === 'next' && currentContentIndex < allContents.length - 1) {
+                showModal(allContents[currentContentIndex + 1], currentContentIndex + 1);
+            }
+        }
+        
+        modalPrev.addEventListener('click', () => navigateModal('prev'));
+        modalNext.addEventListener('click', () => navigateModal('next'));
         
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 Bytes';
@@ -904,8 +1088,8 @@
             
             // ボタンを無効化して進捗表示
             btnCompress.disabled = true;
-            const originalText = btnCompress.textContent;
-            btnCompress.textContent = '圧縮中...';
+            const originalAriaLabel = btnCompress.getAttribute('aria-label');
+            btnCompress.setAttribute('aria-label', '圧縮中...');
             status.textContent = `圧縮中: ${safeFilename}...`;
             
             try {
@@ -920,7 +1104,7 @@
                         showAuthForm();
                         // エラー時はボタンを再有効化
                         btnCompress.disabled = false;
-                        btnCompress.textContent = originalText;
+                        btnCompress.setAttribute('aria-label', originalAriaLabel);
                         return;
                     }
                     const errorData = await response.json();
@@ -938,7 +1122,7 @@
                 console.error(error);
                 // エラー時はボタンを再有効化
                 btnCompress.disabled = false;
-                btnCompress.textContent = originalText;
+                btnCompress.setAttribute('aria-label', originalAriaLabel);
             }
         });
         
@@ -988,8 +1172,17 @@
         });
         
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modalOverlay.style.display === 'flex') {
-                closeModal();
+            if (modalOverlay.style.display === 'flex') {
+                if (e.key === 'Escape') {
+                    e.preventDefault(); // ブラウザのデフォルト動作を防止
+                    closeModal();
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault(); // ブラウザの履歴戻る動作を防止
+                    navigateModal('prev');
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault(); // ブラウザの履歴進む動作を防止
+                    navigateModal('next');
+                }
             }
         });
         

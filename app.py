@@ -16,11 +16,107 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# 開発環境かどうかを判定
+# Flaskのデバッグモードは以下の方法で判定可能：
+# 1. app.debug (Flask起動時に設定される)
+# 2. FLASK_DEBUG環境変数 (Flask 2.2以降、推奨)
+# 3. app.config.get('DEBUG')
+# 環境変数で明示的にHTTPS強制を制御可能にする
+FORCE_HTTPS = os.environ.get('FORCE_HTTPS', 'false').lower() == 'true'
+# FLASK_DEBUG環境変数も確認（Flask 2.2以降で使用可能、推奨方法）
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'on')
+
 # セッションクッキーのセキュリティ設定
-# NLB + Nginx HTTPS終端構成では常にHTTPS前提
+# 重要: SameSite=Noneを使用する場合、Secure=Trueが必須（モダンブラウザの要件）
+# 開発環境（HTTP）ではSameSite='Lax'を使用し、本番環境（HTTPS）ではSameSite='None'を使用
+
+# 環境変数で明示的に制御可能にする
+# 環境変数が設定されているかどうかをチェックするため、元の値を保持
+SESSION_COOKIE_SECURE_ENV = os.environ.get('SESSION_COOKIE_SECURE', '')
+SESSION_COOKIE_SAMESITE_ENV = os.environ.get('SESSION_COOKIE_SAMESITE', '')
+SESSION_SECURE = SESSION_COOKIE_SECURE_ENV.lower() if SESSION_COOKIE_SECURE_ENV else ''
+SESSION_SAMESITE = SESSION_COOKIE_SAMESITE_ENV.lower() if SESSION_COOKIE_SAMESITE_ENV else ''
+
+# Secure属性の設定
+if SESSION_SECURE == 'true':
+    app.config['SESSION_COOKIE_SECURE'] = True
+elif SESSION_SECURE == 'false':
+    app.config['SESSION_COOKIE_SECURE'] = False
+else:
+    # デフォルト: 開発環境ではFalse、本番ではTrue
+    # app.debugは起動時に設定されるため、初期値はFalseに設定し、
+    # before_requestでapp.debugに基づいて動的に調整する
+    app.config['SESSION_COOKIE_SECURE'] = False
+
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS環境では常にTrue
-app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # fetch APIでクッキーを送信するため（Secure=Trueが必須）
+
+# SameSite属性の設定
+# 環境変数で明示的に設定されている場合はそれを使用
+if SESSION_SAMESITE in ('none', 'lax', 'strict'):
+    app.config['SESSION_COOKIE_SAMESITE'] = SESSION_SAMESITE.capitalize()
+    # SameSite=Noneを使用する場合、Secure=Trueが必須（モダンブラウザの要件）
+    if app.config['SESSION_COOKIE_SAMESITE'] == 'None' and not app.config['SESSION_COOKIE_SECURE']:
+        # 無効な組み合わせを防ぐため、自動的にSecure=Trueに設定
+        import warnings
+        warnings.warn(
+            "SameSite=None requires Secure=True (browser requirement). "
+            "Setting SESSION_COOKIE_SECURE=True automatically. "
+            "For development over HTTP, consider using SameSite='Lax' instead.",
+            UserWarning
+        )
+        app.config['SESSION_COOKIE_SECURE'] = True
+else:
+    # デフォルト: Secure=Trueの場合は'None'、Falseの場合は'Lax'
+    # SameSite=Noneを使用する場合は、必ずSecure=Trueが必須
+    # 初期値はSecure=Falseに基づいて'Lax'に設定し、
+    # before_requestでapp.debugに基づいて動的に調整する
+    if app.config['SESSION_COOKIE_SECURE']:
+        app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # HTTPS環境: クロスサイト対応（fetch APIで必要）
+    else:
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # HTTP環境: 同一サイトのみ（開発環境向け）
+
+# app.debugに基づいてセッションクッキー設定を動的に調整する関数
+def adjust_session_cookie_config():
+    """
+    app.debugの状態に基づいてセッションクッキー設定を動的に調整
+    環境変数で明示的に設定されている場合は変更しない
+    """
+    # 環境変数で明示的に設定されている場合は調整しない
+    # SESSION_COOKIE_SECURE_ENVが空文字列でない場合（環境変数が設定されている場合）は調整しない
+    if SESSION_COOKIE_SECURE_ENV:
+        return
+    
+    # app.debugがFalse（本番環境）の場合、Secure=Trueに設定
+    # app.debugがTrue（開発環境）の場合、Secure=Falseのまま
+    is_development = (
+        app.debug or 
+        FLASK_DEBUG or 
+        app.config.get('DEBUG', False)
+    )
+    
+    if not is_development:
+        # 本番環境: Secure=True, SameSite='None'
+        app.config['SESSION_COOKIE_SECURE'] = True
+        # SameSiteが環境変数で設定されていない場合のみ更新
+        if not SESSION_COOKIE_SAMESITE_ENV:
+            app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    else:
+        # 開発環境: Secure=False, SameSite='Lax'
+        app.config['SESSION_COOKIE_SECURE'] = False
+        # SameSiteが環境変数で設定されていない場合のみ更新
+        if not SESSION_COOKIE_SAMESITE_ENV:
+            app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    
+    # SameSite=NoneとSecure=Falseの組み合わせを検証
+    if app.config['SESSION_COOKIE_SAMESITE'] == 'None' and not app.config['SESSION_COOKIE_SECURE']:
+        import warnings
+        warnings.warn(
+            "SameSite=None requires Secure=True (browser requirement). "
+            "Setting SESSION_COOKIE_SECURE=True automatically.",
+            UserWarning
+        )
+        app.config['SESSION_COOKIE_SECURE'] = True
 # セッションの永続化設定
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
@@ -168,6 +264,64 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
             os.remove(temp_input_path)
         if temp_output_path and os.path.exists(temp_output_path):
             os.remove(temp_output_path)
+
+# セッションクッキー設定の調整フラグ（一度だけ実行するため）
+_session_cookie_config_adjusted = False
+
+@app.before_request
+def adjust_session_cookie_config_on_first_request():
+    """
+    最初のリクエスト時にapp.debugに基づいてセッションクッキー設定を調整
+    """
+    global _session_cookie_config_adjusted
+    if not _session_cookie_config_adjusted:
+        adjust_session_cookie_config()
+        _session_cookie_config_adjusted = True
+
+@app.before_request
+def reject_http():
+    """
+    HTTPリクエストを拒否（HTTPSのみ許可）
+    開発環境では無効化され、本番環境またはFORCE_HTTPS環境変数が設定されている場合のみ有効
+    
+    開発環境の判定方法：
+    - app.debug == True (Flask起動時に設定)
+    - FLASK_DEBUG環境変数が設定されている
+    - app.config.get('DEBUG') == True
+    """
+    # 開発環境（デバッグモード）ではHTTP拒否を無効化
+    # 複数の方法で開発環境を判定（より確実にするため）
+    is_development = (
+        app.debug or 
+        FLASK_DEBUG or 
+        app.config.get('DEBUG', False)
+    )
+    
+    if is_development and not FORCE_HTTPS:
+        return
+    
+    # /healthエンドポイントは常に許可
+    if request.path == '/health':
+        return
+    
+    # プロキシ経由の場合、X-Forwarded-Protoヘッダーを確認
+    # プロキシが正しく設定されていれば、X-Forwarded-Proto: httpsが設定される
+    forwarded_proto = request.headers.get('X-Forwarded-Proto', '').lower()
+    is_secure = request.is_secure or forwarded_proto == 'https'
+    
+    # HTTPリクエスト（かつHTTPSに転送されていない）を拒否
+    if request.scheme == 'http' and not is_secure:
+        return jsonify({'error': 'HTTPS required'}), 403
+
+@app.after_request
+def add_security_headers(response):
+    """セキュリティヘッダーを追加"""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
 
 @app.route('/')
 def index():
