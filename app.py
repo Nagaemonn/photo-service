@@ -131,6 +131,11 @@ BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'photo-video-storage-default')
 contents_table = dynamodb.Table('contents')
 users_table = dynamodb.Table('users')
 
+# URLキャッシュ（{user_id}:{s3_key} → (url, timestamp)）
+_url_cache = {}
+_url_cache_ttl = timedelta(hours=1)
+_url_cache_lock = threading.RLock()  # 再入可能ロック（スレッドセーフティ用）
+
 
 def validate_username(username: str) -> tuple[bool, str | None]:
     """
@@ -906,23 +911,60 @@ def get_contents():
     )
     
     contents = response['Items']
+    current_time = datetime.utcnow()
     
-    # S3の署名付きURLを生成
+    # S3の署名付きURLを生成（キャッシュを活用、ロック保護）
     for content in contents:
         s3_key = content['s3_key']
-        content['url'] = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-            ExpiresIn=3600
-        )
+        cache_key = f"{user_id}:{s3_key}"
         
-        # サムネイルがある場合、サムネイルの署名付きURLも生成
+        # キャッシュをチェック（ロック保護）
+        with _url_cache_lock:
+            if cache_key in _url_cache:
+                cached_url, cached_time = _url_cache[cache_key]
+                if current_time - cached_time < _url_cache_ttl:
+                    content['url'] = cached_url
+                else:
+                    # キャッシュが期限切れの場合は再生成
+                    del _url_cache[cache_key]
+                    content['url'] = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+                        ExpiresIn=3600
+                    )
+                    _url_cache[cache_key] = (content['url'], current_time)
+            else:
+                # キャッシュがない場合は新規生成
+                content['url'] = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+                    ExpiresIn=3600
+                )
+                _url_cache[cache_key] = (content['url'], current_time)
+        
+        # サムネイルも同様に処理（ロック保護）
         if 'thumbnail_s3_key' in content:
-            content['thumbnail_url'] = s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
-                ExpiresIn=3600
-            )
+            thumbnail_cache_key = f"{user_id}:{content['thumbnail_s3_key']}"
+            with _url_cache_lock:
+                if thumbnail_cache_key in _url_cache:
+                    cached_url, cached_time = _url_cache[thumbnail_cache_key]
+                    if current_time - cached_time < _url_cache_ttl:
+                        content['thumbnail_url'] = cached_url
+                    else:
+                        del _url_cache[thumbnail_cache_key]
+                        content['thumbnail_url'] = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
+                            ExpiresIn=3600
+                        )
+                        _url_cache[thumbnail_cache_key] = (content['thumbnail_url'], current_time)
+                else:
+                    content['thumbnail_url'] = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
+                        ExpiresIn=3600
+                    )
+                    _url_cache[thumbnail_cache_key] = (content['thumbnail_url'], current_time)
     
     return jsonify({'contents': contents})
 

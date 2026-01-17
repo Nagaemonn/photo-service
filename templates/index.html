@@ -699,6 +699,9 @@
         let isSelectMode = false; // 選択モードのON/OFF
         let selectedContentIds = new Set(); // 選択されたコンテンツIDのセット
         
+        // URLキャッシュ（content_id → {url, thumbnail_url, timestamp}）
+        const imageUrlCache = new Map();
+        
         // 認証状態確認
         async function checkAuth() {
             try {
@@ -1157,71 +1160,231 @@
                     }
                 }
                 
-                gallery.innerHTML = contents.map((content, index) => {
-                    const itemId = `gallery-item-${index}`;
-                    const safeFilename = escapeHtml(content.filename || '');
-                    const safeContentType = escapeHtml(content.content_type || '');
-                    const safeContentId = escapeHtml(content.content_id || '');
-                    const contentType = content.content_type || '';
-                    const isSelected = selectedContentIds.has(content.content_id);
-                    const selectModeClass = isSelectMode ? 'select-mode' : '';
-                    const selectedClass = isSelected ? 'selected' : '';
-                    const checkboxHtml = isSelectMode ? `<input type="checkbox" class="gallery-item-checkbox" data-content-id="${safeContentId}" ${isSelected ? 'checked' : ''}>` : '';
-                    
-                    if (contentType.startsWith('image/')) {
-                        return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
-                            ${checkboxHtml}
-                            <img src="${content.url}" alt="${safeFilename}" loading="lazy">
-                        </div>`;
-                    } else if (contentType.startsWith('video/')) {
-                        // サムネイルがあればサムネイルを表示、なければ動画タグを表示
-                        if (content.thumbnail_url) {
-                            return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
-                                ${checkboxHtml}
-                                <img src="${content.thumbnail_url}" alt="${safeFilename}" loading="lazy">
-                            </div>`;
-                        } else {
-                            return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
-                                ${checkboxHtml}
-                                <video controls><source src="${content.url}" type="${safeContentType}"></video>
-                            </div>`;
-                        }
+                // 既存のDOM要素をMap化（content_idをキーに）
+                const existingItems = new Map();
+                Array.from(gallery.children).forEach(item => {
+                    const contentId = item.dataset.contentId;
+                    if (contentId) {
+                        existingItems.set(contentId, item);
                     }
-                    return '';
-                }).join('');
+                });
                 
-                // 各ギャラリーアイテムにクリックイベントを追加
+                // 新しいコンテンツのIDセット
+                const newContentIds = new Set(contents.map(c => c.content_id));
+                
+                // 削除されたアイテムを除去
+                existingItems.forEach((item, contentId) => {
+                    if (!newContentIds.has(contentId)) {
+                        item.remove();
+                        imageUrlCache.delete(contentId);
+                    }
+                });
+                
+                // 各コンテンツを処理
                 contents.forEach((content, index) => {
-                    const item = document.getElementById(`gallery-item-${index}`);
+                    const contentId = content.content_id;
+                    let item = existingItems.get(contentId);
+                    
+                    // キャッシュを更新
+                    imageUrlCache.set(contentId, {
+                        url: content.url,
+                        thumbnail_url: content.thumbnail_url || null,
+                        timestamp: Date.now()
+                    });
+                    
+                    // 既存の要素がある場合
                     if (item) {
-                        if (isSelectMode) {
-                            // 選択モード時は選択トグル
-                            item.addEventListener('click', (e) => {
-                                // チェックボックス自体のクリックは無視（チェックボックスが処理する）
-                                if (e.target.type === 'checkbox') {
-                                    return;
+                        const contentType = content.content_type || '';
+                        const img = item.querySelector('img');
+                        const video = item.querySelector('video');
+                        
+                        // サムネイルが利用可能になった場合、video要素をimg要素に置き換え
+                        if (contentType.startsWith('video/') && content.thumbnail_url && video) {
+                            // video要素をimg要素に置き換え
+                            const safeFilename = escapeHtml(content.filename || '');
+                            const newImg = document.createElement('img');
+                            newImg.src = content.thumbnail_url;
+                            newImg.alt = safeFilename;
+                            newImg.loading = 'lazy';
+                            video.replaceWith(newImg);
+                        } else if (img) {
+                            // 画像の場合
+                            const currentSrc = img.src;
+                            const newSrc = content.thumbnail_url || content.url;
+                            if (currentSrc !== newSrc) {
+                                img.src = newSrc;
+                            }
+                        } else if (video) {
+                            // 動画の場合（サムネイルなし）
+                            const videoSource = video.querySelector('source');
+                            if (videoSource) {
+                                const currentSrc = videoSource.src;
+                                if (currentSrc !== content.url) {
+                                    videoSource.src = content.url;
                                 }
+                            }
+                        }
+                        
+                        // IDを更新（インデックスが変わっている可能性があるため）
+                        item.id = `gallery-item-${index}`;
+                        
+                        // インデックスをdata属性に保存（クリックイベントで最新のindexを使用するため）
+                        item.dataset.index = index;
+                        
+                        // クリックイベントリスナーを更新（古いクロージャを避けるため）
+                        // 要素をクローンして置き換えることで、イベントリスナーを更新（画像は再読み込みされない）
+                        const clonedItem = item.cloneNode(true);
+                        item.parentNode.replaceChild(clonedItem, item);
+                        const updatedItem = clonedItem;
+                        
+                        // 新しいクリックイベントリスナーを追加
+                        updatedItem.addEventListener('click', (e) => {
+                            // チェックボックス自体のクリックは無視
+                            if (e.target.type === 'checkbox') {
+                                return;
+                            }
+                            // 選択モード時は選択トグル、通常モード時はモーダルを開く
+                            if (isSelectMode) {
+                                toggleContentSelection(content.content_id);
+                            } else {
+                                // data属性から最新のインデックスを取得
+                                const currentIndex = parseInt(updatedItem.dataset.index) || index;
+                                const currentContent = allContents[currentIndex];
+                                if (currentContent) {
+                                    showModal(currentContent, currentIndex);
+                                } else {
+                                    // フォールバック: content_idで検索
+                                    const foundIndex = allContents.findIndex(c => c.content_id === content.content_id);
+                                    if (foundIndex !== -1) {
+                                        showModal(allContents[foundIndex], foundIndex);
+                                    }
+                                }
+                            }
+                        });
+                        
+                        // チェックボックスのイベントリスナーも更新
+                        const checkbox = updatedItem.querySelector('.gallery-item-checkbox');
+                        if (checkbox) {
+                            checkbox.addEventListener('click', (e) => {
+                                e.stopPropagation();
                                 toggleContentSelection(content.content_id);
                             });
-                            // チェックボックスのイベントリスナー
-                            const checkbox = item.querySelector('input[type="checkbox"]');
-                            if (checkbox) {
-                                checkbox.addEventListener('click', (e) => {
-                                    e.stopPropagation();
-                                    toggleContentSelection(content.content_id);
-                                });
+                        }
+                        
+                        // 位置が変わっている場合は移動（ソート順を維持）
+                        const currentIndex = Array.from(gallery.children).indexOf(updatedItem);
+                        if (currentIndex !== index) {
+                            const referenceItem = gallery.children[index];
+                            if (referenceItem) {
+                                gallery.insertBefore(updatedItem, referenceItem);
+                            } else {
+                                // 末尾に移動
+                                gallery.appendChild(updatedItem);
                             }
+                        }
+                    } else {
+                        // 新規要素を作成
+                        const newItem = createGalleryItem(content, index);
+                        // 正しい位置に挿入（ソート順を維持）
+                        const referenceItem = gallery.children[index];
+                        if (referenceItem) {
+                            gallery.insertBefore(newItem, referenceItem);
                         } else {
-                            // 通常モード時はモーダルを開く
-                            item.addEventListener('click', () => {
-                                showModal(content, index);
-                            });
+                            gallery.appendChild(newItem);
                         }
                     }
                 });
+                
+                // 選択モードのUIを更新
+                updateSelectModeUI();
+                
             } catch (error) {
                 console.error('ギャラリー読み込みエラー:', error);
             }
+        }
+        
+        function createGalleryItem(content, index) {
+            const itemId = `gallery-item-${index}`;
+            const safeFilename = escapeHtml(content.filename || '');
+            const safeContentType = escapeHtml(content.content_type || '');
+            const safeContentId = escapeHtml(content.content_id || '');
+            const contentType = content.content_type || '';
+            const isSelected = selectedContentIds.has(content.content_id);
+            const selectModeClass = isSelectMode ? 'select-mode' : '';
+            const selectedClass = isSelected ? 'selected' : '';
+            
+            const div = document.createElement('div');
+            div.className = `gallery-item ${selectModeClass} ${selectedClass}`;
+            div.id = itemId;
+            div.dataset.contentId = content.content_id;
+            div.dataset.index = index;  // インデックスをdata属性に保存
+            
+            // チェックボックスを追加（選択モード時）
+            if (isSelectMode) {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'gallery-item-checkbox';
+                checkbox.dataset.contentId = content.content_id;
+                checkbox.checked = isSelected;
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleContentSelection(content.content_id);
+                });
+                div.appendChild(checkbox);
+            }
+            
+            if (contentType.startsWith('image/')) {
+                const img = document.createElement('img');
+                img.src = content.url;
+                img.alt = safeFilename;
+                img.loading = 'lazy';
+                div.appendChild(img);
+            } else if (contentType.startsWith('video/')) {
+                // サムネイルがあればサムネイルを表示、なければ動画タグを表示
+                if (content.thumbnail_url) {
+                    const img = document.createElement('img');
+                    img.src = content.thumbnail_url;
+                    img.alt = safeFilename;
+                    img.loading = 'lazy';
+                    div.appendChild(img);
+                } else {
+                    const video = document.createElement('video');
+                    video.controls = true;
+                    const source = document.createElement('source');
+                    source.src = content.url;
+                    source.type = safeContentType;
+                    video.appendChild(source);
+                    div.appendChild(video);
+                }
+            }
+            
+            // クリックイベントを追加（isSelectModeをチェックする方式）
+            // インデックスはdata属性から取得して、常に最新の値を使用
+            div.addEventListener('click', (e) => {
+                // チェックボックス自体のクリックは無視
+                if (e.target.type === 'checkbox') {
+                    return;
+                }
+                // 選択モード時は選択トグル、通常モード時はモーダルを開く
+                if (isSelectMode) {
+                    toggleContentSelection(content.content_id);
+                } else {
+                    // data属性から最新のインデックスを取得
+                    const currentIndex = parseInt(e.currentTarget.dataset.index) || index;
+                    const currentContent = allContents[currentIndex];
+                    if (currentContent) {
+                        showModal(currentContent, currentIndex);
+                    } else {
+                        // フォールバック: content_idで検索
+                        const foundIndex = allContents.findIndex(c => c.content_id === content.content_id);
+                        if (foundIndex !== -1) {
+                            showModal(allContents[foundIndex], foundIndex);
+                        }
+                    }
+                }
+            });
+            
+            return div;
         }
         
         function showModal(content, index) {
@@ -1293,6 +1456,57 @@
             currentContent = null;
         }
         
+        // 選択モードUIのみを更新（画像再読み込みなし）
+        function updateSelectModeUI() {
+            Array.from(gallery.children).forEach(item => {
+                const contentId = item.dataset.contentId;
+                if (!contentId) return;
+                
+                // コンテンツ情報を取得
+                const content = allContents.find(c => c.content_id === contentId);
+                if (!content) return;
+                const index = allContents.indexOf(content);
+                
+                if (isSelectMode) {
+                    // 選択モードON
+                    item.classList.add('select-mode');
+                    
+                    // チェックボックスがなければ追加
+                    let checkbox = item.querySelector('.gallery-item-checkbox');
+                    if (!checkbox) {
+                        checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.className = 'gallery-item-checkbox';
+                        checkbox.dataset.contentId = contentId;
+                        checkbox.checked = selectedContentIds.has(contentId);
+                        checkbox.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            toggleContentSelection(contentId);
+                        });
+                        item.insertBefore(checkbox, item.firstChild);
+                    } else {
+                        checkbox.checked = selectedContentIds.has(contentId);
+                    }
+                } else {
+                    // 選択モードOFF
+                    item.classList.remove('select-mode');
+                    
+                    // チェックボックスを削除
+                    const checkbox = item.querySelector('.gallery-item-checkbox');
+                    if (checkbox) {
+                        checkbox.remove();
+                    }
+                }
+                
+                // 選択状態を更新
+                if (selectedContentIds.has(contentId)) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            });
+        }
+        
         // 選択モード関連の関数
         function toggleSelectMode() {
             isSelectMode = !isSelectMode;
@@ -1305,8 +1519,8 @@
                 if (modalOverlay.style.display === 'flex') {
                     closeModal();
                 }
-                // ギャラリーを再読み込みしてチェックボックスを表示
-                loadGallery();
+                // UIのみ更新（画像再読み込みなし）
+                updateSelectModeUI();
             } else {
                 // 選択モードOFF
                 gallery.classList.remove('select-mode');
@@ -1314,7 +1528,8 @@
                 btnSelectMode.innerHTML = '<span class="material-icons">check_circle_outline</span><span>選択</span>';
                 selectedContentIds.clear();
                 updateSelectionCount();
-                loadGallery(); // ギャラリーを再読み込みしてチェックボックスを削除
+                // UIのみ更新（画像再読み込みなし）
+                updateSelectModeUI();
             }
         }
         
