@@ -309,6 +309,64 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
         if temp_output_path and os.path.exists(temp_output_path):
             os.remove(temp_output_path)
 
+
+def generate_video_thumbnail(content_id: str, s3_key: str, user_id: str) -> dict:
+    """
+    動画からサムネイルを生成する関数。
+    戻り値: {'success': bool, 'thumbnail_s3_key': str, 'error': str}
+    """
+    temp_video_path = None
+    temp_thumbnail_path = None
+    
+    try:
+        # 一時ファイルを作成
+        temp_video = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        temp_video_path = temp_video.name
+        temp_video.close()
+
+        temp_thumbnail = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+        temp_thumbnail_path = temp_thumbnail.name
+        temp_thumbnail.close()
+
+        # S3から動画をダウンロード
+        s3_client.download_file(BUCKET_NAME, s3_key, temp_video_path)
+
+        # ffmpegでサムネイル生成（1秒目のフレームを抽出）
+        try:
+            (
+                ffmpeg
+                .input(temp_video_path, ss=1)  # 1秒目のフレーム
+                .output(temp_thumbnail_path, vframes=1, format='image2', vcodec='mjpeg')
+                .overwrite_output()
+                .run(quiet=True)
+            )
+        except ffmpeg.Error as e:
+            return {'success': False, 'error': f'FFmpeg error: {str(e)}'}
+
+        # サムネイルをS3にアップロード
+        thumbnail_s3_key = f"{user_id}/{content_id}_thumbnail.jpg"
+        s3_client.upload_file(
+            temp_thumbnail_path,
+            BUCKET_NAME,
+            thumbnail_s3_key,
+            ExtraArgs={'ContentType': 'image/jpeg'}
+        )
+
+        return {
+            'success': True,
+            'thumbnail_s3_key': thumbnail_s3_key
+        }
+
+    except Exception as e:
+        print(f"Thumbnail generation error: {str(e)}")
+        return {'success': False, 'error': str(e)}
+    finally:
+        # 一時ファイルを削除
+        if temp_video_path and os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        if temp_thumbnail_path and os.path.exists(temp_thumbnail_path):
+            os.remove(temp_thumbnail_path)
+
 # セッションクッキー設定の調整フラグ（一度だけ実行するため）
 _session_cookie_config_adjusted = False
 
@@ -773,9 +831,47 @@ def register_content():
                     'note': 'Duplicate detected after insertion. Manual cleanup may be required.'
                 }), 409
     
+    # 動画の場合、サムネイル生成を試行
+    content_type = data['content_type']
+    result = {'status': 'success', 'content_id': data['content_id']}
+    
+    if content_type.startswith('video/'):
+        thumbnail_result = generate_video_thumbnail(
+            data['content_id'],
+            s3_key,
+            user_id
+        )
+        if thumbnail_result.get('success'):
+            # サムネイル生成成功時、DynamoDBにthumbnail_s3_keyを追加
+            try:
+                contents_table.update_item(
+                    Key={
+                        'content_id': data['content_id'],
+                        'upload_date': upload_date
+                    },
+                    UpdateExpression='SET thumbnail_s3_key = :tsk',
+                    ExpressionAttributeValues={
+                        ':tsk': thumbnail_result['thumbnail_s3_key']
+                    }
+                )
+                result['thumbnail_s3_key'] = thumbnail_result['thumbnail_s3_key']
+            except ClientError as e:
+                # DynamoDB更新失敗時はログに記録するが、アップロード自体は成功とする
+                # サムネイルはS3に存在するが、メタデータが更新されていない状態
+                error_code = e.response.get('Error', {}).get('Code', '')
+                print(f"Warning: Failed to update thumbnail metadata for {data['content_id']}: {error_code} - {str(e)}")
+                result['thumbnail_metadata_update_error'] = f'Thumbnail generated but metadata update failed: {error_code}'
+            except Exception as e:
+                # 予期しない例外もキャッチ
+                print(f"Warning: Unexpected error updating thumbnail metadata for {data['content_id']}: {str(e)}")
+                result['thumbnail_metadata_update_error'] = 'Thumbnail generated but metadata update failed'
+        else:
+            # サムネイル生成失敗時はログに記録するが、アップロード自体は成功とする
+            print(f"Warning: Thumbnail generation failed for {data['content_id']}: {thumbnail_result.get('error')}")
+            result['thumbnail_generation_error'] = thumbnail_result.get('error', 'Unknown error')
+    
     # 自動圧縮が有効な場合、圧縮処理を実行
     auto_compress = data.get('auto_compress', False)
-    result = {'status': 'success', 'content_id': data['content_id']}
     
     if auto_compress:
         compression_result = perform_compression(
@@ -816,6 +912,14 @@ def get_contents():
             Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
             ExpiresIn=3600
         )
+        
+        # サムネイルがある場合、サムネイルの署名付きURLも生成
+        if 'thumbnail_s3_key' in content:
+            content['thumbnail_url'] = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
+                ExpiresIn=3600
+            )
     
     return jsonify({'contents': contents})
 
@@ -842,6 +946,14 @@ def delete_content(content_id):
         item = response['Items'][0]
         s3_key = item['s3_key']
         upload_date = item['upload_date']
+        
+        # サムネイルが存在する場合、サムネイルも削除
+        thumbnail_s3_key = item.get('thumbnail_s3_key')
+        if thumbnail_s3_key:
+            try:
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=thumbnail_s3_key)
+            except Exception as thumbnail_error:
+                print(f"Warning: Failed to delete thumbnail {thumbnail_s3_key}: {thumbnail_error}")
 
         # まずDynamoDBからメタデータを削除（順序を逆にして、DynamoDB削除が失敗した場合はS3削除を実行しない）
         contents_table.delete_item(

@@ -1174,10 +1174,18 @@
                             <img src="${content.url}" alt="${safeFilename}" loading="lazy">
                         </div>`;
                     } else if (contentType.startsWith('video/')) {
-                        return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
-                            ${checkboxHtml}
-                            <video controls><source src="${content.url}" type="${safeContentType}"></video>
-                        </div>`;
+                        // サムネイルがあればサムネイルを表示、なければ動画タグを表示
+                        if (content.thumbnail_url) {
+                            return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
+                                ${checkboxHtml}
+                                <img src="${content.thumbnail_url}" alt="${safeFilename}" loading="lazy">
+                            </div>`;
+                        } else {
+                            return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
+                                ${checkboxHtml}
+                                <video controls><source src="${content.url}" type="${safeContentType}"></video>
+                            </div>`;
+                        }
                     }
                     return '';
                 }).join('');
