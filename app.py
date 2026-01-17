@@ -319,7 +319,22 @@ def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+    # CSP: connect-srcにS3ドメインを追加（リージョン別に列挙）
+    # us-east-1はデフォルト形式（*.s3.amazonaws.com）
+    # その他のリージョンはリージョン指定形式（*.s3.{region}.amazonaws.com）
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "img-src 'self' data: https:; "
+        "script-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "connect-src 'self' "
+        "https://*.s3.amazonaws.com "
+        "https://*.s3.us-west-2.amazonaws.com; "
+        "media-src 'self' "
+        "https://*.s3.amazonaws.com "
+        "https://*.s3.us-west-2.amazonaws.com;"
+    )
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     return response
 
