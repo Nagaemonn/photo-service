@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, session
+from flask import Flask, request, jsonify, render_template, session, send_file
 from functools import wraps
 import boto3
 from botocore.exceptions import ClientError
@@ -6,6 +6,9 @@ import uuid
 from datetime import datetime, timedelta
 import os
 import tempfile
+import zipfile
+import threading
+import time
 from dotenv import load_dotenv
 from PIL import Image
 import ffmpeg
@@ -905,6 +908,187 @@ def compress_content(content_id):
 
     except Exception as e:
         print(f"Compression error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+def cleanup_temp_files_after_delay(zip_path, dir_path, max_retries=30, retry_interval=2):
+    """
+    バックグラウンドスレッドで一時ファイルを削除
+    ファイルが削除可能になるまでリトライする（最大60秒: 30回×2秒）
+    """
+    def cleanup():
+        retries = 0
+        while retries < max_retries:
+            time.sleep(retry_interval)  # 各リトライの間隔
+            try:
+                # ファイルが存在し、削除可能かチェック
+                if zip_path and os.path.exists(zip_path):
+                    # Windowsでは、ファイルが開いている場合PermissionErrorが発生
+                    # 削除を試みて成功すれば、ファイルは閉じられている
+                    try:
+                        os.remove(zip_path)
+                    except PermissionError:
+                        # ファイルがまだ開いている場合はリトライ
+                        retries += 1
+                        continue
+                    except FileNotFoundError:
+                        # 既に削除されている場合は成功
+                        pass
+                
+                # ディレクトリの削除
+                if dir_path and os.path.exists(dir_path):
+                    try:
+                        for file in os.listdir(dir_path):
+                            file_path = os.path.join(dir_path, file)
+                            if os.path.isfile(file_path):
+                                try:
+                                    os.remove(file_path)
+                                except (PermissionError, FileNotFoundError):
+                                    pass
+                        os.rmdir(dir_path)
+                    except (OSError, PermissionError):
+                        # ディレクトリが空でない、または削除できない場合はリトライ
+                        retries += 1
+                        continue
+                
+                # すべての削除が成功したら終了
+                break
+            except Exception as e:
+                retries += 1
+                if retries >= max_retries:
+                    print(f"Cleanup error after {max_retries} retries: {str(e)}")
+                continue
+        
+        if retries >= max_retries:
+            print(f"Warning: Could not delete temporary files after {max_retries} retries")
+    
+    # バックグラウンドスレッドで実行（daemon=Trueでメインスレッド終了時に自動終了）
+    thread = threading.Thread(target=cleanup, daemon=True)
+    thread.start()
+
+@app.route('/api/contents/batch-download', methods=['POST'])
+@require_auth
+def batch_download_contents():
+    """一括ダウンロード（Zip生成）"""
+    temp_zip_path = None
+    temp_dir = None
+    
+    try:
+        user_id = session['user_id']  # セッションから取得
+        data = request.get_json()
+        if data is None:
+            return jsonify({'error': 'Invalid JSON or missing Content-Type: application/json'}), 400
+        content_ids = data.get('content_ids', [])
+        
+        if not content_ids:
+            return jsonify({'error': 'No content IDs provided'}), 400
+        
+        if not isinstance(content_ids, list):
+            return jsonify({'error': 'content_ids must be a list'}), 400
+        
+        # 一時ディレクトリを作成
+        temp_dir = tempfile.mkdtemp()
+        temp_zip_path = os.path.join(temp_dir, 'download.zip')
+        
+        # Zipファイルを作成
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            added_count = 0
+            skipped_count = 0
+            
+            for content_id in content_ids:
+                try:
+                    # DynamoDBからメタデータを取得（所有者チェック）
+                    response = contents_table.scan(
+                        FilterExpression='content_id = :cid AND user_id = :uid',
+                        ExpressionAttributeValues={
+                            ':cid': content_id,
+                            ':uid': user_id
+                        }
+                    )
+                    
+                    if not response['Items']:
+                        # 所有者でない、または存在しないコンテンツはスキップ
+                        skipped_count += 1
+                        print(f"Warning: Content {content_id} not found or not owned by user {user_id}")
+                        continue
+                    
+                    item = response['Items'][0]
+                    s3_key = item['s3_key']
+                    filename = sanitize_filename(item.get('filename', 'unknown'))
+                    
+                    # S3からファイルをダウンロード
+                    temp_file_path = os.path.join(temp_dir, f"{content_id}_{filename}")
+                    try:
+                        s3_client.download_file(BUCKET_NAME, s3_key, temp_file_path)
+                        
+                        # Zipファイルに追加（重複を避けるため、完全なcontent_idを含む一意なファイル名を使用）
+                        # ファイル名と拡張子を分離
+                        name, ext = os.path.splitext(filename)
+                        # 完全なcontent_idを使用して一意化（衝突を完全に回避）
+                        unique_filename = f"{name}_{content_id}{ext}"
+                        zip_file.write(temp_file_path, unique_filename)
+                        added_count += 1
+                        
+                        # 一時ファイルを削除
+                        os.remove(temp_file_path)
+                    except Exception as download_error:
+                        print(f"Error downloading {s3_key}: {str(download_error)}")
+                        skipped_count += 1
+                        # 一時ファイルが存在する場合は削除
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                        continue
+                        
+                except Exception as e:
+                    print(f"Error processing content {content_id}: {str(e)}")
+                    skipped_count += 1
+                    continue
+        
+        if added_count == 0:
+            # 一時ファイルを削除
+            if temp_zip_path and os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    for file in os.listdir(temp_dir):
+                        file_path = os.path.join(temp_dir, file)
+                        if os.path.isfile(file_path):
+                            os.remove(file_path)
+                    os.rmdir(temp_dir)
+                except Exception:
+                    pass
+            return jsonify({'error': 'No files could be downloaded'}), 400
+        
+        # Zipファイルをレスポンスとして返送
+        # send_file()の後にクリーンアップを開始することで、
+        # ファイルが確実に開かれた後に削除処理が開始される（レースコンディションを回避）
+        response = send_file(
+            temp_zip_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='download.zip'
+        )
+        
+        # バックグラウンドスレッドでファイル送信完了後に一時ファイルを削除
+        # ファイルが削除可能になるまでリトライすることで、
+        # WindowsでのPermissionErrorや不完全なダウンロードを防ぐ
+        cleanup_temp_files_after_delay(temp_zip_path, temp_dir)
+        
+        return response
+        
+    except Exception as e:
+        print(f"Batch download error: {str(e)}")
+        # エラー時も一時ファイルをクリーンアップ
+        try:
+            if temp_zip_path and os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+            if temp_dir and os.path.exists(temp_dir):
+                for file in os.listdir(temp_dir):
+                    file_path = os.path.join(temp_dir, file)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                os.rmdir(temp_dir)
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

@@ -399,6 +399,113 @@
         .main-content.active {
             display: block;
         }
+        /* 選択モード用スタイル */
+        .select-mode-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+        }
+        .btn-select-mode {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.2s;
+        }
+        .btn-select-mode:hover {
+            background-color: #0056b3;
+        }
+        .selection-action-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: #007bff;
+            color: white;
+            padding: 15px 20px;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+        }
+        .selection-action-bar.active {
+            display: flex;
+        }
+        .selection-action-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .selection-action-bar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-action-bar {
+            padding: 8px 16px;
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background-color 0.2s;
+        }
+        .btn-action-bar:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+        .btn-action-bar.delete {
+            background-color: rgba(220, 53, 69, 0.8);
+            border-color: rgba(220, 53, 69, 1);
+        }
+        .btn-action-bar.delete:hover {
+            background-color: rgba(220, 53, 69, 1);
+        }
+        .gallery-item.select-mode {
+            position: relative;
+        }
+        .gallery-item.select-mode::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 123, 255, 0.1);
+            z-index: 1;
+            pointer-events: none;
+        }
+        .gallery-item.select-mode.selected::before {
+            background-color: rgba(0, 123, 255, 0.3);
+        }
+        .gallery-item-checkbox {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 24px;
+            height: 24px;
+            z-index: 2;
+            cursor: pointer;
+            accent-color: #007bff;
+        }
+        .gallery.select-mode .gallery-item {
+            cursor: pointer;
+        }
+        .gallery.select-mode .gallery-item:hover {
+            transform: scale(1.02);
+        }
     </style>
 </head>
 <body>
@@ -482,6 +589,34 @@
     
     <div id="status"></div>
     
+    <!-- 選択モードコントロール -->
+    <div class="select-mode-controls">
+        <button class="btn-select-mode" id="btnSelectMode" aria-label="選択モード">
+            <span class="material-icons">check_circle_outline</span>
+            <span>選択</span>
+        </button>
+    </div>
+    
+    <!-- 選択モード時の操作バー -->
+    <div class="selection-action-bar" id="selectionActionBar">
+        <div class="selection-action-bar-left">
+            <span id="selectionCount">0件選択中</span>
+        </div>
+        <div class="selection-action-bar-right">
+            <button class="btn-action-bar delete" id="btnBatchDelete" aria-label="一括削除">
+                <span class="material-icons">delete</span>
+                <span>一括削除</span>
+            </button>
+            <button class="btn-action-bar" id="btnBatchDownload" aria-label="一括ダウンロード">
+                <span class="material-icons">download</span>
+                <span>一括ダウンロード</span>
+            </button>
+            <button class="btn-action-bar" id="btnCancelSelection" aria-label="キャンセル">
+                <span>キャンセル</span>
+            </button>
+        </div>
+    </div>
+    
     <div class="gallery" id="gallery"></div>
     
     <!-- ポップアップモーダル -->
@@ -548,9 +683,21 @@
         const btnDownload = document.getElementById('btnDownload');
         const btnDelete = document.getElementById('btnDelete');
         
+        // 選択モード用DOM要素
+        const btnSelectMode = document.getElementById('btnSelectMode');
+        const selectionActionBar = document.getElementById('selectionActionBar');
+        const selectionCount = document.getElementById('selectionCount');
+        const btnBatchDelete = document.getElementById('btnBatchDelete');
+        const btnBatchDownload = document.getElementById('btnBatchDownload');
+        const btnCancelSelection = document.getElementById('btnCancelSelection');
+        
         let currentContent = null; // 現在表示中のコンテンツメタデータ
         let allContents = []; // 全コンテンツリスト（モーダルナビゲーション用）
         let currentContentIndex = -1; // 現在表示中のコンテンツのインデックス
+        
+        // 選択モード管理
+        let isSelectMode = false; // 選択モードのON/OFF
+        let selectedContentIds = new Set(); // 選択されたコンテンツIDのセット
         
         // 認証状態確認
         async function checkAuth() {
@@ -948,13 +1095,21 @@
                     const itemId = `gallery-item-${index}`;
                     const safeFilename = escapeHtml(content.filename || '');
                     const safeContentType = escapeHtml(content.content_type || '');
+                    const safeContentId = escapeHtml(content.content_id || '');
                     const contentType = content.content_type || '';
+                    const isSelected = selectedContentIds.has(content.content_id);
+                    const selectModeClass = isSelectMode ? 'select-mode' : '';
+                    const selectedClass = isSelected ? 'selected' : '';
+                    const checkboxHtml = isSelectMode ? `<input type="checkbox" class="gallery-item-checkbox" data-content-id="${safeContentId}" ${isSelected ? 'checked' : ''}>` : '';
+                    
                     if (contentType.startsWith('image/')) {
-                        return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
+                        return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
+                            ${checkboxHtml}
                             <img src="${content.url}" alt="${safeFilename}" loading="lazy">
                         </div>`;
                     } else if (contentType.startsWith('video/')) {
-                        return `<div class="gallery-item" id="${itemId}" data-content-id="${content.content_id}">
+                        return `<div class="gallery-item ${selectModeClass} ${selectedClass}" id="${itemId}" data-content-id="${safeContentId}">
+                            ${checkboxHtml}
                             <video controls><source src="${content.url}" type="${safeContentType}"></video>
                         </div>`;
                     }
@@ -965,9 +1120,29 @@
                 contents.forEach((content, index) => {
                     const item = document.getElementById(`gallery-item-${index}`);
                     if (item) {
-                        item.addEventListener('click', () => {
-                            showModal(content, index);
-                        });
+                        if (isSelectMode) {
+                            // 選択モード時は選択トグル
+                            item.addEventListener('click', (e) => {
+                                // チェックボックス自体のクリックは無視（チェックボックスが処理する）
+                                if (e.target.type === 'checkbox') {
+                                    return;
+                                }
+                                toggleContentSelection(content.content_id);
+                            });
+                            // チェックボックスのイベントリスナー
+                            const checkbox = item.querySelector('input[type="checkbox"]');
+                            if (checkbox) {
+                                checkbox.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    toggleContentSelection(content.content_id);
+                                });
+                            }
+                        } else {
+                            // 通常モード時はモーダルを開く
+                            item.addEventListener('click', () => {
+                                showModal(content, index);
+                            });
+                        }
                     }
                 });
             } catch (error) {
@@ -1043,6 +1218,197 @@
             modalOverlay.style.display = 'none';
             currentContent = null;
         }
+        
+        // 選択モード関連の関数
+        function toggleSelectMode() {
+            isSelectMode = !isSelectMode;
+            if (isSelectMode) {
+                // 選択モードON
+                gallery.classList.add('select-mode');
+                selectionActionBar.classList.add('active');
+                btnSelectMode.innerHTML = '<span class="material-icons">cancel</span><span>選択を解除</span>';
+                // モーダルが開いている場合は閉じる
+                if (modalOverlay.style.display === 'flex') {
+                    closeModal();
+                }
+                // ギャラリーを再読み込みしてチェックボックスを表示
+                loadGallery();
+            } else {
+                // 選択モードOFF
+                gallery.classList.remove('select-mode');
+                selectionActionBar.classList.remove('active');
+                btnSelectMode.innerHTML = '<span class="material-icons">check_circle_outline</span><span>選択</span>';
+                selectedContentIds.clear();
+                updateSelectionCount();
+                loadGallery(); // ギャラリーを再読み込みしてチェックボックスを削除
+            }
+        }
+        
+        function updateSelectionCount() {
+            const count = selectedContentIds.size;
+            selectionCount.textContent = `${count}件選択中`;
+            // 操作ボタンの有効/無効を切り替え
+            btnBatchDelete.disabled = count === 0;
+            btnBatchDownload.disabled = count === 0;
+        }
+        
+        function toggleContentSelection(contentId) {
+            if (selectedContentIds.has(contentId)) {
+                selectedContentIds.delete(contentId);
+            } else {
+                selectedContentIds.add(contentId);
+            }
+            updateSelectionCount();
+            // チェックボックスの状態を更新
+            // CSS.escape()を使用してCSSセレクタ用にエスケープ
+            const escapedContentId = CSS.escape(contentId);
+            const checkbox = document.querySelector(`input[type="checkbox"][data-content-id="${escapedContentId}"]`);
+            if (checkbox) {
+                checkbox.checked = selectedContentIds.has(contentId);
+            }
+            // ギャラリーアイテムの選択状態を更新
+            const item = document.querySelector(`.gallery-item[data-content-id="${escapedContentId}"]`);
+            if (item) {
+                if (selectedContentIds.has(contentId)) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            }
+        }
+        
+        // 選択モードボタンのイベントリスナー
+        btnSelectMode.addEventListener('click', toggleSelectMode);
+        btnCancelSelection.addEventListener('click', toggleSelectMode);
+        
+        // 一括削除機能
+        btnBatchDelete.addEventListener('click', async () => {
+            if (selectedContentIds.size === 0) return;
+            
+            const count = selectedContentIds.size;
+            // 1回目の確認
+            if (!confirm(`${count}件のコンテンツを削除しますか？\n\nこの操作は取り消せません。`)) {
+                return;
+            }
+            
+            // 2回目の確認
+            if (!confirm('本当に削除しますか？この操作は取り消せません。')) {
+                return;
+            }
+            
+            // ボタンを無効化
+            btnBatchDelete.disabled = true;
+            btnBatchDelete.innerHTML = '<span class="material-icons">hourglass_empty</span><span>削除中...</span>';
+            status.textContent = `削除中: ${count}件のコンテンツ...`;
+            
+            const contentIds = Array.from(selectedContentIds);
+            let successCount = 0;
+            let errorCount = 0;
+            let authError = false;
+            
+            try {
+                // 各コンテンツを削除
+                for (const contentId of contentIds) {
+                    try {
+                        const response = await fetch(`/api/contents/${contentId}`, {
+                            method: 'DELETE',
+                            credentials: 'include'
+                        });
+                        
+                        if (!response.ok) {
+                            if (response.status === 401) {
+                                authError = true;
+                                status.textContent = '認証エラー: ログインが必要です';
+                                showAuthForm();
+                                return;
+                            }
+                            errorCount++;
+                            console.error(`削除失敗: ${contentId}`);
+                        } else {
+                            successCount++;
+                        }
+                    } catch (error) {
+                        errorCount++;
+                        console.error(`削除エラー: ${contentId}`, error);
+                    }
+                }
+                
+                // 結果を表示
+                if (errorCount === 0) {
+                    status.textContent = `削除完了: ${successCount}件のコンテンツを削除しました`;
+                } else {
+                    status.textContent = `削除完了: ${successCount}件成功、${errorCount}件失敗`;
+                }
+                
+                // 選択モードを解除してギャラリーを再読み込み
+                if (!authError) {
+                    selectedContentIds.clear();
+                    toggleSelectMode(); // これだけで十分（内部でloadGallery()を呼ぶ）
+                }
+            } finally {
+                // ボタンの状態を復元（401エラー時も含む）
+                if (!authError) {
+                    btnBatchDelete.disabled = false;
+                    btnBatchDelete.innerHTML = '<span class="material-icons">delete</span><span>一括削除</span>';
+                } else {
+                    // 認証エラー時もボタンの状態を復元
+                    btnBatchDelete.disabled = false;
+                    btnBatchDelete.innerHTML = '<span class="material-icons">delete</span><span>一括削除</span>';
+                }
+            }
+        });
+        
+        // 一括ダウンロード機能
+        btnBatchDownload.addEventListener('click', async () => {
+            if (selectedContentIds.size === 0) return;
+            
+            const contentIds = Array.from(selectedContentIds);
+            const count = contentIds.length;
+            
+            // ボタンを無効化
+            btnBatchDownload.disabled = true;
+            btnBatchDownload.innerHTML = '<span class="material-icons">hourglass_empty</span><span>ダウンロード準備中...</span>';
+            status.textContent = `ダウンロード準備中: ${count}件のコンテンツ...`;
+            
+            try {
+                const response = await fetch('/api/contents/batch-download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ content_ids: contentIds })
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        status.textContent = '認証エラー: ログインが必要です';
+                        showAuthForm();
+                        return;
+                    }
+                    const error = await response.json();
+                    throw new Error(error.error || 'ダウンロードに失敗しました');
+                }
+                
+                // Zipファイルをダウンロード
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'download.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                status.textContent = `ダウンロード完了: ${count}件のコンテンツを含むZipファイル`;
+            } catch (error) {
+                status.textContent = `エラー: ${error.message}`;
+                console.error('Batch download error:', error);
+            } finally {
+                // ボタンを再有効化
+                btnBatchDownload.disabled = false;
+                btnBatchDownload.innerHTML = '<span class="material-icons">download</span><span>一括ダウンロード</span>';
+            }
+        });
         
         // 削除機能
         btnDelete.addEventListener('click', async () => {
