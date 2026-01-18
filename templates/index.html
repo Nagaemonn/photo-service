@@ -54,6 +54,9 @@
         .gallery-item.loading {
             animation: skeleton-loading 1.5s ease-in-out infinite;
         }
+        .gallery-item:not(.loading) {
+            background: none;
+        }
         @keyframes skeleton-loading {
             0% {
                 background-position: 200% 0;
@@ -1657,8 +1660,8 @@
                             // video要素をimg要素に置き換え
                             const safeFilename = escapeHtml(content.filename || '');
                             const newImg = document.createElement('img');
-                            // 優先度を設定
-                            if (index < 6) {
+                            // 優先度を設定（横5枚 × 縦3行 = 15枚）
+                            if (index < 15) {
                                 newImg.fetchPriority = 'high';
                             } else {
                                 newImg.fetchPriority = 'low';
@@ -1666,12 +1669,14 @@
                             // 遅延読み込み用にdata-srcに保存
                             newImg.dataset.src = content.thumbnail_url;
                             newImg.alt = safeFilename;
-                            // 最初の6枚はeager loading、それ以降はlazy loading
-                            if (index >= 6) {
+                            // 最初の15枚はeager loading、それ以降はlazy loading
+                            if (index >= 15) {
                                 newImg.loading = 'lazy';
                             }
-                            // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
-                            if (index < 6) {
+                            // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
+                            if (index < 15) {
+                                // loadingクラスを追加（新規作成時と一貫性を保つ）
+                                item.classList.add('loading');
                                 // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                                 newImg.addEventListener('load', () => {
                                     item.classList.remove('loading');
@@ -1692,8 +1697,8 @@
                             applyExifOrientation(newImg, content.thumbnail_url, false);
                             video.replaceWith(newImg);
                             
-                            // Intersection Observerで監視（最初の6枚以外）
-                            if (index >= 6 && imageObserver) {
+                            // Intersection Observerで監視（最初の15枚以外）
+                            if (index >= 15 && imageObserver) {
                                 imageObserver.observe(newImg);
                             }
                             
@@ -1710,16 +1715,18 @@
                             const currentSrc = img.src;
                             const newSrc = content.thumbnail_url || content.url;
                             if (currentSrc !== newSrc) {
-                                // 優先度を設定
-                                if (index < 6) {
+                                // 優先度を設定（横5枚 × 縦3行 = 15枚）
+                                if (index < 15) {
                                     img.fetchPriority = 'high';
                                 } else {
                                     img.fetchPriority = 'low';
                                 }
                                 // 遅延読み込み用にdata-srcに保存
                                 img.dataset.src = newSrc;
-                                // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
-                                if (index < 6) {
+                                // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
+                                if (index < 15) {
+                                    // loadingクラスを追加（新規作成時と一貫性を保つ）
+                                    item.classList.add('loading');
                                     // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                                     img.addEventListener('load', () => {
                                         item.classList.remove('loading');
@@ -1916,22 +1923,22 @@
             
             if (contentType.startsWith('image/')) {
                 const img = document.createElement('img');
-                // 最初の6枚の画像に優先度を設定
-                if (index < 6) {
+                // 最初の15枚の画像に優先度を設定（横5枚 × 縦3行 = 15枚）
+                div.classList.add('loading');  // スケルトンローディング用のクラスを追加（全画像に適用）
+                if (index < 15) {
                     img.fetchPriority = 'high';
                 } else {
                     img.fetchPriority = 'low';
-                    div.classList.add('loading');  // スケルトンローディング用のクラスを追加
                 }
                 // 遅延読み込み用にdata-srcに保存
                 img.dataset.src = content.url;
                 img.alt = safeFilename;
-                // 最初の6枚はeager loading、それ以降はlazy loading
-                if (index >= 6) {
+                // 最初の15枚はeager loading、それ以降はlazy loading
+                if (index >= 15) {
                     img.loading = 'lazy';
                 }
-                // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
-                if (index < 6) {
+                // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
+                if (index < 15) {
                     // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                     img.addEventListener('load', () => {
                         div.classList.remove('loading');
@@ -1955,22 +1962,22 @@
                 // サムネイルがあればサムネイルを表示、なければ動画タグを表示
                 if (content.thumbnail_url) {
                     const img = document.createElement('img');
-                    // 最初の6枚の画像に優先度を設定
-                    if (index < 6) {
+                    // 最初の15枚の画像に優先度を設定（横5枚 × 縦3行 = 15枚）
+                    div.classList.add('loading');  // スケルトンローディング用のクラスを追加（全画像に適用）
+                    if (index < 15) {
                         img.fetchPriority = 'high';
                     } else {
                         img.fetchPriority = 'low';
-                        div.classList.add('loading');  // スケルトンローディング用のクラスを追加
                     }
                     // 遅延読み込み用にdata-srcに保存
                     img.dataset.src = content.thumbnail_url;
                     img.alt = safeFilename;
-                    // 最初の6枚はeager loading、それ以降はlazy loading
-                    if (index >= 6) {
+                    // 最初の15枚はeager loading、それ以降はlazy loading
+                    if (index >= 15) {
                         img.loading = 'lazy';
                     }
-                    // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
-                    if (index < 6) {
+                    // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
+                    if (index < 15) {
                         // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                         img.addEventListener('load', () => {
                             div.classList.remove('loading');
