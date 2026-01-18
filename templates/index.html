@@ -850,6 +850,7 @@
         // 選択モード管理
         let isSelectMode = false; // 選択モードのON/OFF
         let selectedContentIds = new Set(); // 選択されたコンテンツIDのセット
+        let lastSelectedIndex = -1; // 最後に選択されたアイテムのインデックス（アンカー）
         
         // URLキャッシュ（content_id → {url, thumbnail_url, timestamp}）
         const imageUrlCache = new Map();
@@ -1496,6 +1497,9 @@
                 const previousContentId = currentContent ? currentContent.content_id : null;
                 
                 allContents = contents; // モーダルナビゲーション用に保存
+                // ギャラリーがリロードされたため、範囲選択のアンカーをリセット
+                // （アイテムの順序が変わっている可能性があるため）
+                lastSelectedIndex = -1;
                 
                 // モーダルが開いている場合、現在表示中のコンテンツの新しいインデックスを見つけて更新
                 if (wasModalOpen && previousContentId) {
@@ -1636,10 +1640,14 @@
                             }
                             // 選択モード時は選択トグル、通常モード時はモーダルを開く
                             if (isSelectMode) {
-                                toggleContentSelection(content.content_id);
+                                // data属性から最新のインデックスを取得
+                                const parsed = parseInt(updatedItem.dataset.index, 10);
+                                const currentIndex = isNaN(parsed) ? index : parsed;
+                                handleItemSelection(content.content_id, currentIndex, e);
                             } else {
                                 // data属性から最新のインデックスを取得
-                                const currentIndex = parseInt(updatedItem.dataset.index) || index;
+                                const parsed = parseInt(updatedItem.dataset.index, 10);
+                                const currentIndex = isNaN(parsed) ? index : parsed;
                                 const currentContent = allContents[currentIndex];
                                 if (currentContent) {
                                     showModal(currentContent, currentIndex);
@@ -1658,7 +1666,10 @@
                         if (checkbox) {
                             checkbox.addEventListener('click', (e) => {
                                 e.stopPropagation();
-                                toggleContentSelection(content.content_id);
+                                // data属性から最新のインデックスを取得
+                                const parsed = parseInt(updatedItem.dataset.index, 10);
+                                const currentIndex = isNaN(parsed) ? index : parsed;
+                                handleItemSelection(content.content_id, currentIndex, e);
                             });
                         }
                         
@@ -1729,7 +1740,10 @@
                 checkbox.checked = isSelected;
                 checkbox.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    toggleContentSelection(content.content_id);
+                    // data属性から最新のインデックスを取得
+                    const parsed = parseInt(div.dataset.index, 10);
+                    const currentIndex = isNaN(parsed) ? index : parsed;
+                    handleItemSelection(content.content_id, currentIndex, e);
                 });
                 div.appendChild(checkbox);
             }
@@ -1796,10 +1810,14 @@
                 }
                 // 選択モード時は選択トグル、通常モード時はモーダルを開く
                 if (isSelectMode) {
-                    toggleContentSelection(content.content_id);
+                    // data属性から最新のインデックスを取得
+                    const parsed = parseInt(e.currentTarget.dataset.index, 10);
+                    const currentIndex = isNaN(parsed) ? index : parsed;
+                    handleItemSelection(content.content_id, currentIndex, e);
                 } else {
                     // data属性から最新のインデックスを取得
-                    const currentIndex = parseInt(e.currentTarget.dataset.index) || index;
+                    const parsed = parseInt(e.currentTarget.dataset.index, 10);
+                    const currentIndex = isNaN(parsed) ? index : parsed;
                     const currentContent = allContents[currentIndex];
                     if (currentContent) {
                         showModal(currentContent, currentIndex);
@@ -1937,7 +1955,10 @@
                         checkbox.checked = selectedContentIds.has(contentId);
                         checkbox.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            toggleContentSelection(contentId);
+                            // data属性から最新のインデックスを取得
+                            const parsed = parseInt(item.dataset.index, 10);
+                            const currentIndex = isNaN(parsed) ? index : parsed;
+                            handleItemSelection(contentId, currentIndex, e);
                         });
                         item.insertBefore(checkbox, item.firstChild);
                     } else {
@@ -1983,6 +2004,7 @@
                 selectionActionBar.classList.remove('active');
                 btnSelectMode.innerHTML = '<span class="material-icons">check_circle_outline</span><span>選択</span>';
                 selectedContentIds.clear();
+                lastSelectedIndex = -1; // アンカーをリセット
                 updateSelectionCount();
                 // UIのみ更新（画像再読み込みなし）
                 updateSelectModeUI();
@@ -2019,6 +2041,75 @@
                 } else {
                     item.classList.remove('selected');
                 }
+            }
+        }
+        
+        // 範囲選択関数
+        function selectRange(startIndex, endIndex) {
+            const start = Math.min(startIndex, endIndex);
+            const end = Math.max(startIndex, endIndex);
+            
+            // 範囲内のすべてのアイテムを選択
+            for (let i = start; i <= end; i++) {
+                if (i >= 0 && i < allContents.length) {
+                    const contentId = allContents[i].content_id;
+                    selectedContentIds.add(contentId);
+                    
+                    // UIを更新
+                    const escapedContentId = CSS.escape(contentId);
+                    const checkbox = document.querySelector(`input[type="checkbox"][data-content-id="${escapedContentId}"]`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                    }
+                    const item = document.querySelector(`.gallery-item[data-content-id="${escapedContentId}"]`);
+                    if (item) {
+                        item.classList.add('selected');
+                    }
+                }
+            }
+            
+            // 範囲外のアイテムを選択解除
+            for (let i = 0; i < allContents.length; i++) {
+                if (i < start || i > end) {
+                    const contentId = allContents[i].content_id;
+                    if (selectedContentIds.has(contentId)) {
+                        selectedContentIds.delete(contentId);
+                        
+                        // UIを更新
+                        const escapedContentId = CSS.escape(contentId);
+                        const checkbox = document.querySelector(`input[type="checkbox"][data-content-id="${escapedContentId}"]`);
+                        if (checkbox) {
+                            checkbox.checked = false;
+                        }
+                        const item = document.querySelector(`.gallery-item[data-content-id="${escapedContentId}"]`);
+                        if (item) {
+                            item.classList.remove('selected');
+                        }
+                    }
+                }
+            }
+            
+            updateSelectionCount();
+        }
+        
+        // アイテム選択を処理する関数（Shiftキー対応）
+        function handleItemSelection(contentId, index, event) {
+            if (event && event.shiftKey) {
+                if (lastSelectedIndex !== -1) {
+                    // Shift+クリック: 範囲選択（アンカーが設定されている場合）
+                    selectRange(lastSelectedIndex, index);
+                    // アンカーを新しいエンドポイントに更新（標準的な動作）
+                    lastSelectedIndex = index;
+                } else {
+                    // Shift+クリック: アンカーが未設定の場合は、そのアイテムを選択してアンカーとして設定
+                    toggleContentSelection(contentId);
+                    lastSelectedIndex = index;
+                }
+            } else {
+                // 通常クリック: 個別選択/解除
+                toggleContentSelection(contentId);
+                // アンカーを更新
+                lastSelectedIndex = index;
             }
         }
         
