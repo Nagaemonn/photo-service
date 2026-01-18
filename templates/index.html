@@ -69,8 +69,13 @@
             opacity: 0;
             transition: opacity 0.3s ease-in;
         }
-        .gallery-item img[data-loaded="true"] {
-            opacity: 1 !important;  /* data-srcセレクタより優先 */
+        /* loadingクラスが存在する間は画像を非表示（スケルトンローディング中） */
+        .gallery-item.loading img {
+            opacity: 0 !important;
+        }
+        /* loadingクラスが削除され、data-loadedが設定されている場合のみ表示 */
+        .gallery-item:not(.loading) img[data-loaded="true"] {
+            opacity: 1 !important;
         }
         .gallery-item:hover {
             transform: scale(1.05);
@@ -927,9 +932,12 @@
                 const originalSrc = img.dataset.src || img.src;
                 const galleryItem = img.closest('.gallery-item');
                 img.onload = () => {
-                    img.dataset.loaded = 'true';
-                    if (galleryItem) {
-                        galleryItem.classList.remove('loading');
+                    // 画像が完全に読み込まれたことを確認
+                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        img.dataset.loaded = 'true';
+                        if (galleryItem) {
+                            galleryItem.classList.remove('loading');
+                        }
                     }
                     currentLoads--;
                     processLoadQueue();
@@ -1679,12 +1687,16 @@
                                 item.classList.add('loading');
                                 // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                                 newImg.addEventListener('load', () => {
-                                    item.classList.remove('loading');
+                                    // 画像が完全に読み込まれたことを確認
+                                    if (newImg.complete && newImg.naturalWidth > 0 && newImg.naturalHeight > 0) {
+                                        newImg.dataset.loaded = 'true';
+                                        item.classList.remove('loading');
+                                    }
                                 }, { once: true });
                                 newImg.src = content.thumbnail_url;
-                                newImg.dataset.loaded = 'true';
                                 // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                                if (newImg.complete && newImg.naturalWidth > 0) {
+                                if (newImg.complete && newImg.naturalWidth > 0 && newImg.naturalHeight > 0) {
+                                    newImg.dataset.loaded = 'true';
                                     item.classList.remove('loading');
                                 }
                             } else {
@@ -1729,12 +1741,16 @@
                                     item.classList.add('loading');
                                     // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                                     img.addEventListener('load', () => {
-                                        item.classList.remove('loading');
+                                        // 画像が完全に読み込まれたことを確認
+                                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                            img.dataset.loaded = 'true';
+                                            item.classList.remove('loading');
+                                        }
                                     }, { once: true });
                                     img.src = newSrc;
-                                    img.dataset.loaded = 'true';
                                     // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                                    if (img.complete && img.naturalWidth > 0) {
+                                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                        img.dataset.loaded = 'true';
                                         item.classList.remove('loading');
                                     }
                                 } else {
@@ -1943,12 +1959,16 @@
                 if (index < 15) {
                     // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                     img.addEventListener('load', () => {
-                        div.classList.remove('loading');
+                        // 画像が完全に読み込まれたことを確認
+                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            img.dataset.loaded = 'true';
+                            div.classList.remove('loading');
+                        }
                     }, { once: true });
                     img.src = content.url;
-                    img.dataset.loaded = 'true';
                     // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                    if (img.complete && img.naturalWidth > 0) {
+                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        img.dataset.loaded = 'true';
                         div.classList.remove('loading');
                     }
                 } else {
@@ -1984,12 +2004,16 @@
                     if (index < 15) {
                         // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
                         img.addEventListener('load', () => {
-                            div.classList.remove('loading');
+                            // 画像が完全に読み込まれたことを確認
+                            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                img.dataset.loaded = 'true';
+                                div.classList.remove('loading');
+                            }
                         }, { once: true });
                         img.src = content.thumbnail_url;
-                        img.dataset.loaded = 'true';
                         // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                        if (img.complete && img.naturalWidth > 0) {
+                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            img.dataset.loaded = 'true';
                             div.classList.remove('loading');
                         }
                     } else {
