@@ -730,6 +730,10 @@
             <span class="material-icons">check_circle_outline</span>
             <span>選択</span>
         </button>
+        <button class="btn-select-mode" id="btnUpload" aria-label="アップロード">
+            <span class="material-icons">cloud_upload</span>
+            <span>アップロード</span>
+        </button>
     </div>
     
     <!-- 選択モード時の操作バー -->
@@ -2116,6 +2120,14 @@
         // 選択モードボタンのイベントリスナー
         btnSelectMode.addEventListener('click', toggleSelectMode);
         btnCancelSelection.addEventListener('click', toggleSelectMode);
+        
+        // アップロードボタンのイベントリスナー
+        const btnUpload = document.getElementById('btnUpload');
+        btnUpload.addEventListener('click', () => {
+            if (mainContent.classList.contains('active')) {
+                fileInput.click();
+            }
+        });
         
         // 一括削除機能
         btnBatchDelete.addEventListener('click', async () => {
