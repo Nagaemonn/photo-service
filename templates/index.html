@@ -48,6 +48,26 @@
             min-height: 200px;
             aspect-ratio: 1;
             position: relative; /* 絶対配置の子要素（動画秒数バッジなど）の基準点として必要 */
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+        }
+        .gallery-item.loading {
+            animation: skeleton-loading 1.5s ease-in-out infinite;
+        }
+        @keyframes skeleton-loading {
+            0% {
+                background-position: 200% 0;
+            }
+            100% {
+                background-position: -200% 0;
+            }
+        }
+        .gallery-item img[data-src]:not([src*="data:image"]) {
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+        }
+        .gallery-item img[data-loaded="true"] {
+            opacity: 1;
         }
         .gallery-item:hover {
             transform: scale(1.05);
@@ -859,6 +879,80 @@
         // URLキャッシュ（content_id → {url, thumbnail_url, timestamp}）
         const imageUrlCache = new Map();
         
+        // Intersection Observer for lazy loading
+        let imageObserver = null;
+        
+        // バッチ読み込み管理
+        const MAX_CONCURRENT_LOADS = 3;
+        let currentLoads = 0;
+        const loadQueue = [];
+        
+        // Intersection Observer APIのセットアップ
+        function setupLazyLoading() {
+            // 既存のObserverがあれば切断
+            if (imageObserver) {
+                imageObserver.disconnect();
+            }
+            
+            imageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        if (!img.dataset.loaded) {
+                            loadImage(img);
+                            observer.unobserve(img);
+                        }
+                    }
+                });
+            }, {
+                rootMargin: '200px 0px',  // 200px前から読み込み開始
+                threshold: 0.01
+            });
+            
+            // すべてのlazy画像を監視
+            document.querySelectorAll('img[loading="lazy"]').forEach(img => {
+                if (!img.dataset.loaded) {
+                    imageObserver.observe(img);
+                }
+            });
+        }
+        
+        // 画像読み込み関数（バッチ読み込み対応）
+        function loadImage(img) {
+            if (currentLoads < MAX_CONCURRENT_LOADS) {
+                currentLoads++;
+                const originalSrc = img.dataset.src || img.src;
+                const galleryItem = img.closest('.gallery-item');
+                img.onload = () => {
+                    img.dataset.loaded = 'true';
+                    if (galleryItem) {
+                        galleryItem.classList.remove('loading');
+                    }
+                    currentLoads--;
+                    processLoadQueue();
+                };
+                img.onerror = () => {
+                    if (galleryItem) {
+                        galleryItem.classList.remove('loading');
+                    }
+                    currentLoads--;
+                    processLoadQueue();
+                };
+                if (img.dataset.src) {
+                    img.src = img.dataset.src;
+                }
+            } else {
+                loadQueue.push(img);
+            }
+        }
+        
+        // 読み込みキューを処理
+        function processLoadQueue() {
+            if (loadQueue.length > 0 && currentLoads < MAX_CONCURRENT_LOADS) {
+                loadImage(loadQueue.shift());
+            }
+        }
+        
         // 認証状態確認
         async function checkAuth() {
             clearToasts(); // ページ読み込み時にトーストをクリア
@@ -1563,12 +1657,45 @@
                             // video要素をimg要素に置き換え
                             const safeFilename = escapeHtml(content.filename || '');
                             const newImg = document.createElement('img');
-                            newImg.src = content.thumbnail_url;
+                            // 優先度を設定
+                            if (index < 6) {
+                                newImg.fetchPriority = 'high';
+                            } else {
+                                newImg.fetchPriority = 'low';
+                            }
+                            // 遅延読み込み用にdata-srcに保存
+                            newImg.dataset.src = content.thumbnail_url;
                             newImg.alt = safeFilename;
-                            newImg.loading = 'lazy';
+                            // 最初の6枚はeager loading、それ以降はlazy loading
+                            if (index >= 6) {
+                                newImg.loading = 'lazy';
+                            }
+                            // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
+                            if (index < 6) {
+                                // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
+                                newImg.addEventListener('load', () => {
+                                    item.classList.remove('loading');
+                                }, { once: true });
+                                newImg.src = content.thumbnail_url;
+                                newImg.dataset.loaded = 'true';
+                                // 既に読み込まれている場合（キャッシュ済み）のフォールバック
+                                if (newImg.complete && newImg.naturalWidth > 0) {
+                                    item.classList.remove('loading');
+                                }
+                            } else {
+                                newImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                                item.classList.add('loading');
+                                // プレースホルダーSVGのloadイベントでは何もしない
+                                // 実際の画像読み込みはloadImage()関数内で処理される
+                            }
                             // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
                             applyExifOrientation(newImg, content.thumbnail_url, false);
                             video.replaceWith(newImg);
+                            
+                            // Intersection Observerで監視（最初の6枚以外）
+                            if (index >= 6 && imageObserver) {
+                                imageObserver.observe(newImg);
+                            }
                             
                             // 既存の秒数バッジを削除
                             const existingBadge = item.querySelector('.video-duration-badge');
@@ -1583,7 +1710,37 @@
                             const currentSrc = img.src;
                             const newSrc = content.thumbnail_url || content.url;
                             if (currentSrc !== newSrc) {
-                                img.src = newSrc;
+                                // 優先度を設定
+                                if (index < 6) {
+                                    img.fetchPriority = 'high';
+                                } else {
+                                    img.fetchPriority = 'low';
+                                }
+                                // 遅延読み込み用にdata-srcに保存
+                                img.dataset.src = newSrc;
+                                // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
+                                if (index < 6) {
+                                    // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
+                                    img.addEventListener('load', () => {
+                                        item.classList.remove('loading');
+                                    }, { once: true });
+                                    img.src = newSrc;
+                                    img.dataset.loaded = 'true';
+                                    // 既に読み込まれている場合（キャッシュ済み）のフォールバック
+                                    if (img.complete && img.naturalWidth > 0) {
+                                        item.classList.remove('loading');
+                                    }
+                                } else {
+                                    // 遅延読み込み対象の場合、dataset.loadedをリセット
+                                    // 以前に読み込まれた画像が位置変更で遅延読み込み対象になった場合に対応
+                                    delete img.dataset.loaded;
+                                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                                    item.classList.add('loading');
+                                    // Intersection Observerで監視
+                                    if (imageObserver) {
+                                        imageObserver.observe(img);
+                                    }
+                                }
                                 // EXIF Orientation処理を適用（画像が更新された場合）
                                 const isCompressed = content.compressed === true;
                                 applyExifOrientation(img, newSrc, isCompressed);
@@ -1713,6 +1870,11 @@
                     gallery.style.display = 'grid';
                 }
                 
+                // Intersection Observerをセットアップ
+                setTimeout(() => {
+                    setupLazyLoading();
+                }, 100);
+                
             } catch (error) {
                 console.error('ギャラリー読み込みエラー:', error);
             }
@@ -1754,9 +1916,38 @@
             
             if (contentType.startsWith('image/')) {
                 const img = document.createElement('img');
-                img.src = content.url;
+                // 最初の6枚の画像に優先度を設定
+                if (index < 6) {
+                    img.fetchPriority = 'high';
+                } else {
+                    img.fetchPriority = 'low';
+                    div.classList.add('loading');  // スケルトンローディング用のクラスを追加
+                }
+                // 遅延読み込み用にdata-srcに保存
+                img.dataset.src = content.url;
                 img.alt = safeFilename;
-                img.loading = 'lazy';
+                // 最初の6枚はeager loading、それ以降はlazy loading
+                if (index >= 6) {
+                    img.loading = 'lazy';
+                }
+                // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
+                if (index < 6) {
+                    // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
+                    img.addEventListener('load', () => {
+                        div.classList.remove('loading');
+                    }, { once: true });
+                    img.src = content.url;
+                    img.dataset.loaded = 'true';
+                    // 既に読み込まれている場合（キャッシュ済み）のフォールバック
+                    if (img.complete && img.naturalWidth > 0) {
+                        div.classList.remove('loading');
+                    }
+                } else {
+                    // プレースホルダーとして空のsrcを設定
+                    // プレースホルダーSVGのloadイベントでは何もしない
+                    // 実際の画像読み込みはloadImage()関数内で処理される
+                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                }
                 // EXIF Orientation処理を適用
                 applyExifOrientation(img, content.url, isCompressed);
                 div.appendChild(img);
@@ -1764,9 +1955,38 @@
                 // サムネイルがあればサムネイルを表示、なければ動画タグを表示
                 if (content.thumbnail_url) {
                     const img = document.createElement('img');
-                    img.src = content.thumbnail_url;
+                    // 最初の6枚の画像に優先度を設定
+                    if (index < 6) {
+                        img.fetchPriority = 'high';
+                    } else {
+                        img.fetchPriority = 'low';
+                        div.classList.add('loading');  // スケルトンローディング用のクラスを追加
+                    }
+                    // 遅延読み込み用にdata-srcに保存
+                    img.dataset.src = content.thumbnail_url;
                     img.alt = safeFilename;
-                    img.loading = 'lazy';
+                    // 最初の6枚はeager loading、それ以降はlazy loading
+                    if (index >= 6) {
+                        img.loading = 'lazy';
+                    }
+                    // 最初の6枚は即座に読み込み、それ以降はIntersection Observerで制御
+                    if (index < 6) {
+                        // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
+                        img.addEventListener('load', () => {
+                            div.classList.remove('loading');
+                        }, { once: true });
+                        img.src = content.thumbnail_url;
+                        img.dataset.loaded = 'true';
+                        // 既に読み込まれている場合（キャッシュ済み）のフォールバック
+                        if (img.complete && img.naturalWidth > 0) {
+                            div.classList.remove('loading');
+                        }
+                    } else {
+                        // プレースホルダーとして空のsrcを設定
+                        // プレースホルダーSVGのloadイベントでは何もしない
+                        // 実際の画像読み込みはloadImage()関数内で処理される
+                        img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                    }
                     // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
                     applyExifOrientation(img, content.thumbnail_url, false);
                     div.appendChild(img);

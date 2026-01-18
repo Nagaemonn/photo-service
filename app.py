@@ -1101,16 +1101,24 @@ def get_contents():
                     del _url_cache[cache_key]
                     content['url'] = s3_client.generate_presigned_url(
                         'get_object',
-                        Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-                        ExpiresIn=3600
+                        Params={
+                            'Bucket': BUCKET_NAME,
+                            'Key': s3_key,
+                            'ResponseCacheControl': 'public, max-age=86400, immutable'  # 24時間（URL有効期限と一致）
+                        },
+                        ExpiresIn=86400  # 24時間
                     )
                     _url_cache[cache_key] = (content['url'], current_time)
             else:
                 # キャッシュがない場合は新規生成
                 content['url'] = s3_client.generate_presigned_url(
                     'get_object',
-                    Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-                    ExpiresIn=3600
+                    Params={
+                        'Bucket': BUCKET_NAME,
+                        'Key': s3_key,
+                        'ResponseCacheControl': 'public, max-age=86400, immutable'  # 24時間（URL有効期限と一致）
+                    },
+                    ExpiresIn=86400  # 24時間
                 )
                 _url_cache[cache_key] = (content['url'], current_time)
         
@@ -1126,15 +1134,23 @@ def get_contents():
                         del _url_cache[thumbnail_cache_key]
                         content['thumbnail_url'] = s3_client.generate_presigned_url(
                             'get_object',
-                            Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
-                            ExpiresIn=3600
+                            Params={
+                                'Bucket': BUCKET_NAME,
+                                'Key': content['thumbnail_s3_key'],
+                                'ResponseCacheControl': 'public, max-age=86400, immutable'  # 24時間（URL有効期限と一致）
+                            },
+                            ExpiresIn=86400  # 24時間
                         )
                         _url_cache[thumbnail_cache_key] = (content['thumbnail_url'], current_time)
                 else:
                     content['thumbnail_url'] = s3_client.generate_presigned_url(
                         'get_object',
-                        Params={'Bucket': BUCKET_NAME, 'Key': content['thumbnail_s3_key']},
-                        ExpiresIn=3600
+                        Params={
+                            'Bucket': BUCKET_NAME,
+                            'Key': content['thumbnail_s3_key'],
+                            'ResponseCacheControl': 'public, max-age=86400, immutable'  # 24時間（URL有効期限と一致）
+                        },
+                        ExpiresIn=86400  # 24時間
                     )
                     _url_cache[thumbnail_cache_key] = (content['thumbnail_url'], current_time)
     
