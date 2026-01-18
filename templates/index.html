@@ -39,9 +39,17 @@
         }
         /* モバイル用レスポンシブデザイン - デスクトップには影響なし */
         @media (max-width: 767px) {
+            /* bodyのパディングを小さくして、より多くの幅を確保 */
+            body {
+                padding: 10px;
+            }
             .gallery {
                 grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
                 gap: 10px;
+            }
+            /* Gridアイテムが親の幅を超えないようにする */
+            .gallery-item {
+                min-width: 0;
             }
         }
         .gallery-item {
