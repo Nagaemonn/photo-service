@@ -6,6 +6,7 @@
     <title>Photo & Video Storage</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/exif-js@2.3.0/exif.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -60,6 +61,11 @@
         }
         .gallery-item img {
             loading: lazy;
+            /* image-orientation: from-image; は削除 - JavaScriptで処理するため */
+        }
+        /* モーダル内の画像にも適用 */
+        .modal-media img {
+            /* image-orientation: from-image; は削除 - JavaScriptで処理するため */
         }
         #status {
             padding: 10px;
@@ -1164,6 +1170,89 @@
             return badge;
         }
         
+        // EXIF Orientationを処理して画像を正しい向きで表示
+        function applyExifOrientation(imgElement, imageUrl, isCompressed) {
+            // 圧縮済み画像は既にバックエンドで処理済みのため、スキップ
+            if (isCompressed) {
+                // 圧縮済みでも、以前のtransformをクリアする必要がある
+                imgElement.style.transform = '';
+                return;
+            }
+            
+            // EXIF情報がない場合は通常表示（フォールバック）
+            if (typeof EXIF === 'undefined') {
+                // EXIFライブラリがない場合も、以前のtransformをクリア
+                imgElement.style.transform = '';
+                return;
+            }
+            
+            // 以前のEXIFデータをクリア（srcが更新された場合に備える）
+            // exif-jsライブラリは画像要素にexifdataプロパティをキャッシュするため、
+            // 同じ要素で新しい画像を読み込む際はクリアが必要
+            if (imgElement.exifdata) {
+                delete imgElement.exifdata;
+            }
+            
+            // 画像が既に読み込まれている場合の処理関数
+            const processExifOrientation = function() {
+                try {
+                    EXIF.getData(imgElement, function() {
+                        const orientation = EXIF.getTag(this, 'Orientation');
+                        if (orientation && orientation !== 1) {
+                            // Orientation値に応じてCSS transformを適用
+                            let transform = '';
+                            switch (orientation) {
+                                case 2:
+                                    transform = 'scaleX(-1)';
+                                    break;
+                                case 3:
+                                    transform = 'rotate(180deg)';
+                                    break;
+                                case 4:
+                                    transform = 'scaleY(-1)';
+                                    break;
+                                case 5:
+                                    transform = 'rotate(90deg) scaleY(-1)';
+                                    break;
+                                case 6:
+                                    transform = 'rotate(90deg)';
+                                    break;
+                                case 7:
+                                    transform = 'rotate(-90deg) scaleY(-1)';
+                                    break;
+                                case 8:
+                                    transform = 'rotate(-90deg)';
+                                    break;
+                                default:
+                                    // Orientation 1の場合はtransformをクリア
+                                    imgElement.style.transform = '';
+                                    return;
+                            }
+                            if (transform) {
+                                imgElement.style.transform = transform;
+                            }
+                        } else {
+                            // orientationが1またはundefinedの場合、transformをクリア
+                            imgElement.style.transform = '';
+                        }
+                    });
+                } catch (error) {
+                    // EXIF情報の取得に失敗した場合は通常表示（フォールバック）
+                    // 以前のtransformをクリア
+                    imgElement.style.transform = '';
+                    console.log('EXIF orientation processing failed:', error);
+                }
+            };
+            
+            // 既に読み込まれている場合（キャッシュされた画像など）は即座に処理
+            if (imgElement.complete && imgElement.naturalWidth > 0) {
+                processExifOrientation();
+            } else {
+                // 画像が読み込まれた後にEXIF情報を取得
+                imgElement.addEventListener('load', processExifOrientation, { once: true });
+            }
+        }
+        
         // 動画の秒数を取得（サムネイル表示の場合）
         function loadVideoDuration(videoUrl, container) {
             const tempVideo = document.createElement('video');
@@ -1469,6 +1558,8 @@
                             newImg.src = content.thumbnail_url;
                             newImg.alt = safeFilename;
                             newImg.loading = 'lazy';
+                            // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
+                            applyExifOrientation(newImg, content.thumbnail_url, false);
                             video.replaceWith(newImg);
                             
                             // 既存の秒数バッジを削除
@@ -1485,6 +1576,9 @@
                             const newSrc = content.thumbnail_url || content.url;
                             if (currentSrc !== newSrc) {
                                 img.src = newSrc;
+                                // EXIF Orientation処理を適用（画像が更新された場合）
+                                const isCompressed = content.compressed === true;
+                                applyExifOrientation(img, newSrc, isCompressed);
                             }
                         } else if (video) {
                             // 動画の場合（サムネイルなし）
@@ -1615,6 +1709,7 @@
             const safeContentType = escapeHtml(content.content_type || '');
             const safeContentId = escapeHtml(content.content_id || '');
             const contentType = content.content_type || '';
+            const isCompressed = content.compressed === true;
             const isSelected = selectedContentIds.has(content.content_id);
             const selectModeClass = isSelectMode ? 'select-mode' : '';
             const selectedClass = isSelected ? 'selected' : '';
@@ -1644,6 +1739,8 @@
                 img.src = content.url;
                 img.alt = safeFilename;
                 img.loading = 'lazy';
+                // EXIF Orientation処理を適用
+                applyExifOrientation(img, content.url, isCompressed);
                 div.appendChild(img);
             } else if (contentType.startsWith('video/')) {
                 // サムネイルがあればサムネイルを表示、なければ動画タグを表示
@@ -1652,6 +1749,8 @@
                     img.src = content.thumbnail_url;
                     img.alt = safeFilename;
                     img.loading = 'lazy';
+                    // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
+                    applyExifOrientation(img, content.thumbnail_url, false);
                     div.appendChild(img);
                     
                     // 動画の秒数を取得してバッジを表示
@@ -1718,6 +1817,13 @@
         }
         
         function showModal(content, index) {
+            // 既存の動画要素を停止（ナビゲーション時にも対応）
+            const existingVideo = modalMedia.querySelector('video');
+            if (existingVideo) {
+                existingVideo.pause();
+                existingVideo.currentTime = 0; // 再生位置をリセット
+            }
+            
             currentContent = content;
             currentContentIndex = index;
             modalOverlay.style.display = 'flex';
@@ -1730,8 +1836,22 @@
             // メディア表示
             if (contentType.startsWith('image/')) {
                 modalMedia.innerHTML = `<img src="${content.url}" alt="${safeFilename}">`;
+                // モーダル内の画像にもEXIF Orientation処理を適用
+                const modalImg = modalMedia.querySelector('img');
+                if (modalImg) {
+                    applyExifOrientation(modalImg, content.url, isCompressed);
+                }
             } else if (contentType.startsWith('video/')) {
-                modalMedia.innerHTML = `<video controls><source src="${content.url}" type="${safeContentType}"></video>`;
+                // 動画要素を作成（autoplay, muted, playsinline属性を追加）
+                modalMedia.innerHTML = `<video controls autoplay muted playsinline><source src="${content.url}" type="${safeContentType}"></video>`;
+                // DOMに追加後、確実に再生開始
+                const videoElement = modalMedia.querySelector('video');
+                if (videoElement) {
+                    videoElement.play().catch(error => {
+                        // 自動再生が失敗した場合（ブラウザポリシーなど）はエラーを無視
+                        console.log('Video autoplay failed:', error);
+                    });
+                }
             }
             
             // 情報表示（圧縮済みバッジを含む）
@@ -1782,6 +1902,12 @@
         }
         
         function closeModal() {
+            // 動画要素を取得して停止
+            const videoElement = modalMedia.querySelector('video');
+            if (videoElement) {
+                videoElement.pause();
+                videoElement.currentTime = 0; // 再生位置をリセット
+            }
             modalOverlay.style.display = 'none';
             currentContent = null;
         }
