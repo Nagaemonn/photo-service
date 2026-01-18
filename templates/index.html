@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Photo & Video Storage</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         body {
@@ -651,7 +652,7 @@
             </div>
             <div class="form-group">
                 <label for="loginPassword">パスワード</label>
-                <input type="password" id="loginPassword" required>
+                <input type="password" id="loginPassword" required autocomplete="current-password">
             </div>
             <div id="loginError" class="error-message" style="display: none;"></div>
             <button type="submit" class="btn-auth">ログイン</button>
@@ -665,7 +666,7 @@
             </div>
             <div class="form-group">
                 <label for="registerPassword">パスワード（8〜64文字、英数字記号が利用可能）</label>
-                <input type="password" id="registerPassword" required minlength="8" maxlength="64" pattern=".*">
+                <input type="password" id="registerPassword" required minlength="8" maxlength="64" pattern=".*" autocomplete="new-password">
             </div>
             <div class="form-group">
                 <label for="registerEmail">メールアドレス（任意）</label>
