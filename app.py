@@ -11,7 +11,7 @@ import threading
 import time
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
-from PIL.ExifTags import TAGS, DATETIME
+from PIL.ExifTags import TAGS
 import ffmpeg
 import bcrypt
 
