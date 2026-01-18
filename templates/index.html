@@ -1962,7 +1962,8 @@
                 // 選択モードを解除してギャラリーを再読み込み
                 if (!authError) {
                     selectedContentIds.clear();
-                    toggleSelectMode(); // これだけで十分（内部でloadGallery()を呼ぶ）
+                    toggleSelectMode(); // 選択モードを解除
+                    loadGallery(); // ギャラリーを再読み込みして削除されたアイテムを除去
                 }
             } finally {
                 // ボタンの状態を復元（401エラー時も含む）
