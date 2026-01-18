@@ -70,7 +70,7 @@
             transition: opacity 0.3s ease-in;
         }
         .gallery-item img[data-loaded="true"] {
-            opacity: 1;
+            opacity: 1 !important;  /* data-srcセレクタより優先 */
         }
         .gallery-item:hover {
             transform: scale(1.05);
@@ -1930,8 +1930,10 @@
                 } else {
                     img.fetchPriority = 'low';
                 }
-                // 遅延読み込み用にdata-srcに保存
-                img.dataset.src = content.url;
+                // 遅延読み込み用にdata-srcに保存（最初の15枚には不要）
+                if (index >= 15) {
+                    img.dataset.src = content.url;
+                }
                 img.alt = safeFilename;
                 // 最初の15枚はeager loading、それ以降はlazy loading
                 if (index >= 15) {
@@ -1969,8 +1971,10 @@
                     } else {
                         img.fetchPriority = 'low';
                     }
-                    // 遅延読み込み用にdata-srcに保存
-                    img.dataset.src = content.thumbnail_url;
+                    // 遅延読み込み用にdata-srcに保存（最初の15枚には不要）
+                    if (index >= 15) {
+                        img.dataset.src = content.thumbnail_url;
+                    }
                     img.alt = safeFilename;
                     // 最初の15枚はeager loading、それ以降はlazy loading
                     if (index >= 15) {
