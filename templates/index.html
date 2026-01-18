@@ -271,19 +271,27 @@
         .btn-delete,
         .btn-compress,
         .btn-icon {
-            padding: 10px;
+            padding: 12px 8px;
             border: none;
-            border-radius: 50%;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 20px;
             transition: background-color 0.2s;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            width: 40px;
-            height: 40px;
+            gap: 4px;
+            min-width: 60px;
             background-color: transparent;
             color: #333;
+        }
+        .btn-icon .material-icons {
+            font-size: 24px;
+        }
+        .btn-icon .btn-label {
+            font-size: 12px;
+            line-height: 1;
         }
         .btn-download:hover,
         .btn-delete:hover,
@@ -828,12 +836,15 @@
             <div class="modal-actions">
                 <button class="btn-compress btn-icon" id="btnCompress" aria-label="圧縮">
                     <span class="material-icons">compress</span>
+                    <span class="btn-label">圧縮</span>
                 </button>
                 <button class="btn-download btn-icon" id="btnDownload" aria-label="ダウンロード">
                     <span class="material-icons">download</span>
+                    <span class="btn-label">保存</span>
                 </button>
                 <button class="btn-delete btn-icon" id="btnDelete" aria-label="削除">
                     <span class="material-icons">delete</span>
+                    <span class="btn-label">削除</span>
                 </button>
             </div>
         </div>
