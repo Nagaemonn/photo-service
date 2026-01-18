@@ -936,8 +936,8 @@
                 threshold: 0.01
             });
             
-            // すべてのlazy画像を監視
-            document.querySelectorAll('img[loading="lazy"]').forEach(img => {
+            // すべてのdata-srcを持つ画像を監視（Intersection Observerのみで管理）
+            document.querySelectorAll('img[data-src]').forEach(img => {
                 if (!img.dataset.loaded) {
                     imageObserver.observe(img);
                 }
@@ -1687,10 +1687,9 @@
                             // video要素をimg要素に置き換え
                             const safeFilename = escapeHtml(content.filename || '');
                             const newImg = document.createElement('img');
-                            // すべての画像をlazy loadingで統一
+                            // Intersection Observerで管理（loading属性は使用しない）
                             newImg.dataset.src = content.thumbnail_url;
                             newImg.alt = safeFilename;
-                            newImg.loading = 'lazy';
                             newImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
                             item.classList.add('loading');
                             // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
@@ -1715,9 +1714,8 @@
                             const currentSrc = img.src;
                             const newSrc = content.thumbnail_url || content.url;
                             if (currentSrc !== newSrc) {
-                                // すべての画像をlazy loadingで統一
+                                // Intersection Observerで管理（loading属性は使用しない）
                                 img.dataset.src = newSrc;
-                                img.loading = 'lazy';
                                 // 既に読み込まれている場合はリセット
                                 delete img.dataset.loaded;
                                 img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
@@ -1740,7 +1738,6 @@
                                     if (!img.dataset.src) {
                                         img.dataset.src = newSrc;
                                     }
-                                    img.loading = 'lazy';
                                     item.classList.add('loading');
                                     // Intersection Observerで監視
                                     if (imageObserver) {
@@ -1797,7 +1794,7 @@
                         const updatedItem = clonedItem;
                         
                         // クローン後、Intersection Observerで監視（まだ監視されていない場合）
-                        const clonedImg = updatedItem.querySelector('img[loading="lazy"]');
+                        const clonedImg = updatedItem.querySelector('img[data-src]');
                         if (clonedImg && !clonedImg.dataset.loaded && imageObserver) {
                             imageObserver.observe(clonedImg);
                         }
@@ -1925,11 +1922,10 @@
             
             if (contentType.startsWith('image/')) {
                 const img = document.createElement('img');
-                // すべての画像をlazy loadingで統一
+                // Intersection Observerで管理（loading属性は使用しない）
                 div.classList.add('loading');  // スケルトンローディング用のクラスを追加
                 img.dataset.src = content.url;
                 img.alt = safeFilename;
-                img.loading = 'lazy';
                 img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
                 // EXIF Orientation処理を適用
                 applyExifOrientation(img, content.url, isCompressed);
@@ -1942,11 +1938,10 @@
                 // サムネイルがあればサムネイルを表示、なければ動画タグを表示
                 if (content.thumbnail_url) {
                     const img = document.createElement('img');
-                    // すべての画像をlazy loadingで統一
+                    // Intersection Observerで管理（loading属性は使用しない）
                     div.classList.add('loading');  // スケルトンローディング用のクラスを追加
                     img.dataset.src = content.thumbnail_url;
                     img.alt = safeFilename;
-                    img.loading = 'lazy';
                     img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
                     // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
                     applyExifOrientation(img, content.thumbnail_url, false);
