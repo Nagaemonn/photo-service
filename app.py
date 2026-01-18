@@ -11,6 +11,7 @@ import threading
 import time
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
+from PIL.ExifTags import TAGS, DATETIME
 import ffmpeg
 import bcrypt
 
@@ -225,6 +226,146 @@ def sanitize_filename(name: str) -> str:
     return sanitized
 
 
+def extract_image_datetime(s3_key: str) -> str | None:
+    """
+    画像からEXIF撮影日時を取得する関数。
+    戻り値: ISO8601形式の日時文字列、またはNone（取得できない場合）
+    """
+    temp_file_path = None
+    try:
+        # 一時ファイルを作成
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_file_path = temp_file.name
+        temp_file.close()
+        
+        # S3からファイルをダウンロード
+        s3_client.download_file(BUCKET_NAME, s3_key, temp_file_path)
+        
+        # 画像を開く（with文で自動的に閉じる）
+        with Image.open(temp_file_path) as img:
+            # EXIF情報を取得
+            exifdata = img.getexif()
+            if not exifdata:
+                return None
+            
+            # DateTimeOriginal (306) または DateTimeDigitized (36868) を優先的に取得
+            # TAGS辞書でタグ名を取得
+            datetime_original = None
+            datetime_digitized = None
+            
+            for tag_id, value in exifdata.items():
+                tag = TAGS.get(tag_id, tag_id)
+                if tag == 'DateTimeOriginal':
+                    datetime_original = value
+                elif tag == 'DateTimeDigitized':
+                    datetime_digitized = value
+            
+            # DateTimeOriginalを優先、なければDateTimeDigitizedを使用
+            datetime_str = datetime_original or datetime_digitized
+            
+            if not datetime_str:
+                return None
+            
+            # EXIF日時形式 (YYYY:MM:DD HH:MM:SS) をISO8601形式に変換
+            try:
+                # EXIF日時形式をパース
+                dt = datetime.strptime(datetime_str, '%Y:%m:%d %H:%M:%S')
+                # ISO8601形式に変換
+                return dt.isoformat()
+            except (ValueError, TypeError) as e:
+                print(f"Failed to parse EXIF datetime '{datetime_str}': {str(e)}")
+                return None
+            
+    except Exception as e:
+        print(f"Error extracting image datetime from {s3_key}: {str(e)}")
+        return None
+    finally:
+        # 一時ファイルを削除
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+
+
+def extract_video_datetime(s3_key: str) -> str | None:
+    """
+    動画から作成日時を取得する関数。
+    戻り値: ISO8601形式の日時文字列、またはNone（取得できない場合）
+    """
+    temp_file_path = None
+    try:
+        # 一時ファイルを作成
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_file_path = temp_file.name
+        temp_file.close()
+        
+        # S3からファイルをダウンロード
+        s3_client.download_file(BUCKET_NAME, s3_key, temp_file_path)
+        
+        # ffprobeでメタデータを取得
+        try:
+            probe = ffmpeg.probe(temp_file_path)
+        except ffmpeg.Error as e:
+            print(f"ffprobe error for {s3_key}: {str(e)}")
+            return None
+        
+        # creation_timeを探す
+        # formatタグから取得を試みる
+        format_tags = probe.get('format', {}).get('tags', {})
+        creation_time = format_tags.get('creation_time') or format_tags.get('com.apple.quicktime.creationdate')
+        
+        if creation_time:
+            try:
+                # ISO8601形式の文字列をそのまま返す（既にISO8601形式の場合）
+                # または、パースしてISO8601形式に変換
+                # ffprobeは通常ISO8601形式で返す
+                dt = datetime.fromisoformat(creation_time.replace('Z', '+00:00'))
+                # タイムゾーン情報を削除してUTCとして扱う（画像と統一）
+                dt_naive = dt.replace(tzinfo=None)
+                return dt_naive.isoformat()
+            except (ValueError, TypeError) as e:
+                # パースに失敗した場合、別の形式を試す
+                try:
+                    # 他の形式を試す（例: "2024-01-01T12:00:00"）
+                    dt = datetime.strptime(creation_time, '%Y-%m-%dT%H:%M:%S')
+                    return dt.isoformat()
+                except (ValueError, TypeError) as e2:
+                    print(f"Failed to parse video creation_time '{creation_time}': {str(e2)}")
+                    return None
+        
+        # streamsからも探す
+        streams = probe.get('streams', [])
+        for stream in streams:
+            stream_tags = stream.get('tags', {})
+            creation_time = stream_tags.get('creation_time') or stream_tags.get('com.apple.quicktime.creationdate')
+            if creation_time:
+                try:
+                    dt = datetime.fromisoformat(creation_time.replace('Z', '+00:00'))
+                    # タイムゾーン情報を削除してUTCとして扱う（画像と統一）
+                    dt_naive = dt.replace(tzinfo=None)
+                    return dt_naive.isoformat()
+                except (ValueError, TypeError) as e:
+                    try:
+                        dt = datetime.strptime(creation_time, '%Y-%m-%dT%H:%M:%S')
+                        return dt.isoformat()
+                    except (ValueError, TypeError):
+                        continue
+        
+        return None
+            
+    except Exception as e:
+        print(f"Error extracting video datetime from {s3_key}: {str(e)}")
+        return None
+    finally:
+        # 一時ファイルを削除
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+
+
 def perform_compression(content_id: str, s3_key: str, content_type: str, upload_date: str) -> dict:
     """
     コンテンツを圧縮する内部関数。
@@ -255,24 +396,23 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
         s3_client.download_file(BUCKET_NAME, s3_key, temp_input_path)
 
         # 画像圧縮（Pillow）
-        img = Image.open(temp_input_path)
-        
-        # EXIF Orientation情報を適用して画像を正しい向きに回転
-        img = ImageOps.exif_transpose(img)
-        
-        # RGBに変換（PNGの透過情報などは失われる）
-        if img.mode in ('RGBA', 'LA', 'P'):
-            # 透過画像の場合は白背景に合成
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-            img = background
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # JPEG品質75で保存
-        img.save(temp_output_path, 'JPEG', quality=75, optimize=True)
+        with Image.open(temp_input_path) as img:
+            # EXIF Orientation情報を適用して画像を正しい向きに回転
+            img = ImageOps.exif_transpose(img)
+            
+            # RGBに変換（PNGの透過情報などは失われる）
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # 透過画像の場合は白背景に合成
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # JPEG品質75で保存
+            img.save(temp_output_path, 'JPEG', quality=75, optimize=True)
         new_content_type = 'image/jpeg'
 
         # 圧縮後のファイルサイズを取得
@@ -740,6 +880,26 @@ def register_content():
     s3_key = data['s3_key']
     
     upload_date = datetime.utcnow().isoformat()
+    
+    # メディアの撮影日時・作成日時を取得
+    content_type = data['content_type']
+    media_created_date = None
+    
+    try:
+        if content_type.startswith('image/'):
+            # 画像の場合、EXIFから撮影日時を取得
+            media_created_date = extract_image_datetime(s3_key)
+        elif content_type.startswith('video/'):
+            # 動画の場合、メタデータから作成日時を取得
+            media_created_date = extract_video_datetime(s3_key)
+    except Exception as e:
+        # メタデータ抽出に失敗した場合はログに記録して続行
+        print(f"Warning: Failed to extract media datetime for {s3_key}: {str(e)}")
+    
+    # 取得できない場合はupload_dateをフォールバックとして使用
+    if not media_created_date:
+        media_created_date = upload_date
+    
     item = {
         'content_id': data['content_id'],
         'upload_date': upload_date,
@@ -748,7 +908,8 @@ def register_content():
         's3_key': data['s3_key'],
         'content_type': data['content_type'],
         'file_size': data['file_size'],
-        'compressed': False
+        'compressed': False,
+        'media_created_date': media_created_date
     }
     
     # 重複チェックと挿入をアトミックに実行
@@ -913,6 +1074,15 @@ def get_contents():
     )
     
     contents = response['Items']
+    
+    # media_created_dateでソート（降順：新しい順）
+    # media_created_dateが存在しない場合はupload_dateをフォールバックとして使用
+    def get_sort_key(content):
+        # media_created_dateを優先、なければupload_dateを使用
+        return content.get('media_created_date') or content.get('upload_date', '')
+    
+    contents.sort(key=get_sort_key, reverse=True)
+    
     current_time = datetime.utcnow()
     
     # S3の署名付きURLを生成（キャッシュを活用、ロック保護）
