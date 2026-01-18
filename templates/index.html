@@ -1793,6 +1793,47 @@
                                 // EXIF Orientation処理を適用（画像が更新された場合）
                                 const isCompressed = content.compressed === true;
                                 applyExifOrientation(img, newSrc, isCompressed);
+                            } else {
+                                // URLが同じ場合（順序変更のみ）でも、上15件に入った場合はloadingクラスを適切に処理
+                                if (index < 15) {
+                                    // 既に読み込まれている画像の場合、loadingクラスを削除
+                                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                        img.dataset.loaded = 'true';
+                                        item.classList.remove('loading');
+                                        // 優先度を更新
+                                        img.fetchPriority = 'high';
+                                    } else {
+                                        // まだ読み込まれていない場合、loadingクラスを追加して読み込み開始
+                                        item.classList.add('loading');
+                                        img.fetchPriority = 'high';
+                                        img.addEventListener('load', () => {
+                                            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                                img.dataset.loaded = 'true';
+                                                item.classList.remove('loading');
+                                            }
+                                        }, { once: true });
+                                        // srcが設定されていない場合は設定
+                                        if (!img.src || img.src === 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E') {
+                                            img.src = newSrc;
+                                        }
+                                    }
+                                } else {
+                                    // 15件以降に移動した場合、遅延読み込みに切り替え
+                                    if (img.dataset.loaded) {
+                                        delete img.dataset.loaded;
+                                    }
+                                    if (!img.dataset.src) {
+                                        img.dataset.src = newSrc;
+                                    }
+                                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                                    item.classList.add('loading');
+                                    img.fetchPriority = 'low';
+                                    img.loading = 'lazy';
+                                    // Intersection Observerで監視
+                                    if (imageObserver) {
+                                        imageObserver.observe(img);
+                                    }
+                                }
                             }
                         } else if (video) {
                             // 動画の場合（サムネイルなし）
