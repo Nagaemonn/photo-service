@@ -45,6 +45,7 @@
             flex-direction: column;
             min-height: 200px;
             aspect-ratio: 1;
+            position: relative; /* 絶対配置の子要素（動画秒数バッジなど）の基準点として必要 */
         }
         .gallery-item:hover {
             transform: scale(1.05);
@@ -63,6 +64,89 @@
             padding: 10px;
             margin: 10px 0;
             border-radius: 5px;
+            display: none;
+        }
+        /* トースト通知スタイル */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            background-color: white;
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            min-width: 300px;
+            max-width: 500px;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: opacity 150ms ease-out, transform 150ms ease-out;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .toast.success {
+            border-left: 4px solid #28a745;
+        }
+        .toast.error {
+            border-left: 4px solid #dc3545;
+        }
+        .toast.info {
+            border-left: 4px solid #007bff;
+        }
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        .toast.success .toast-icon {
+            color: #28a745;
+        }
+        .toast.error .toast-icon {
+            color: #dc3545;
+        }
+        .toast.info .toast-icon {
+            color: #007bff;
+        }
+        .toast-message {
+            flex: 1;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #333;
+        }
+        .toast-close {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            font-size: 18px;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border-radius: 50%;
+            transition: background-color 150ms ease-out;
+        }
+        .toast-close:hover {
+            background-color: #f0f0f0;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .toast {
+                transition: none;
+            }
         }
         /* モーダルスタイル */
         .modal-overlay {
@@ -506,13 +590,53 @@
         .gallery.select-mode .gallery-item:hover {
             transform: scale(1.02);
         }
+        /* 動画秒数バッジ */
+        .video-duration-badge {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+            font-variant-numeric: tabular-nums;
+            z-index: 10;
+            pointer-events: none;
+        }
+        /* フッタースタイル */
+        footer {
+            margin-top: 40px;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #eee;
+        }
+        /* 空の状態スタイル */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        .empty-state-icon {
+            font-size: 64px;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+        .empty-state-message {
+            font-size: 16px;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
     <!-- 認証UI -->
     <div id="authContainer" class="auth-container">
         <div class="auth-header">
-            <h1>Photo & Video Storage</h1>
+            <h1 style="text-wrap: balance;">Memoria</h1>
+            <p>Photo & Video Storage</p>
         </div>
         <div class="auth-tabs">
             <button class="auth-tab active" id="loginTab">ログイン</button>
@@ -583,11 +707,15 @@
             </div>
         </div>
         
-        <h1>Photo & Video Storage</h1>
+        <h1 style="text-wrap: balance;">Memoria</h1>
+        <p>Photo & Video Storage</p>
     
     <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
     
     <div id="status"></div>
+    
+    <!-- トースト通知コンテナ -->
+    <div class="toast-container" id="toastContainer"></div>
     
     <!-- 選択モードコントロール -->
     <div class="select-mode-controls">
@@ -619,6 +747,16 @@
     
     <div class="gallery" id="gallery"></div>
     
+    <!-- 空の状態メッセージ -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+        <div class="empty-state-icon">
+            <span class="material-icons" style="font-size: 64px;">cloud_upload</span>
+        </div>
+        <div class="empty-state-message">
+            ここにドラッグ&ドロップして写真や動画をアップロードできます
+        </div>
+    </div>
+    
     <!-- ポップアップモーダル -->
     <div class="modal-overlay" id="modalOverlay" style="display: none;">
         <button class="modal-navigation prev" id="modalPrev" aria-label="前のメディア">
@@ -649,6 +787,11 @@
     </div>
     <!-- mainContent の閉じタグ -->
     
+    <!-- フッター -->
+    <footer>
+        © 2026 Nagasue Hiroto. All Rights Reserved.
+    </footer>
+    
     <script>
         // 認証状態管理
         let currentUser = null;
@@ -672,6 +815,7 @@
         const status = document.getElementById('status');
         const gallery = document.getElementById('gallery');
         const settingsAutoCompressCheckbox = document.getElementById('settingsAutoCompressCheckbox');
+        const toastContainer = document.getElementById('toastContainer');
         
         const modalOverlay = document.getElementById('modalOverlay');
         const modalMedia = document.getElementById('modalMedia');
@@ -690,6 +834,7 @@
         const btnBatchDelete = document.getElementById('btnBatchDelete');
         const btnBatchDownload = document.getElementById('btnBatchDownload');
         const btnCancelSelection = document.getElementById('btnCancelSelection');
+        const emptyState = document.getElementById('emptyState');
         
         let currentContent = null; // 現在表示中のコンテンツメタデータ
         let allContents = []; // 全コンテンツリスト（モーダルナビゲーション用）
@@ -704,6 +849,7 @@
         
         // 認証状態確認
         async function checkAuth() {
+            clearToasts(); // ページ読み込み時にトーストをクリア
             try {
                 const response = await fetch('/api/me', {
                     credentials: 'include'
@@ -746,6 +892,7 @@
         }
         
         function showMainContent() {
+            clearToasts(); // メインコンテンツ表示時にトーストをクリア
             authContainer.style.display = 'none';
             mainContent.classList.add('active');
             if (currentUser) {
@@ -966,18 +1113,22 @@
                     throw new Error(error.error || 'アカウント削除に失敗しました');
                 }
                 
-                status.textContent = 'アカウントを削除しました';
+                showToast('アカウントを削除しました', 'success');
                 showAuthForm();
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error('Account deletion error:', error);
             }
         });
         
-        // 自動圧縮設定をlocalStorageから読み込み
+        // 自動圧縮設定をlocalStorageから読み込み（デフォルト: false）
         const savedAutoCompress = localStorage.getItem('autoCompress');
-        const autoCompressValue = savedAutoCompress === 'true';
-        if (savedAutoCompress !== null) {
+        if (savedAutoCompress === null) {
+            // 初回アクセス時はデフォルトでfalseに設定
+            localStorage.setItem('autoCompress', 'false');
+            settingsAutoCompressCheckbox.checked = false;
+        } else {
+            const autoCompressValue = savedAutoCompress === 'true';
             settingsAutoCompressCheckbox.checked = autoCompressValue;
         }
         
@@ -994,6 +1145,112 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+        
+        // 動画の秒数をMM:SS形式に変換
+        function formatDuration(seconds) {
+            if (!isFinite(seconds) || seconds < 0) return '00:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+        
+        // 動画秒数バッジを作成
+        function createDurationBadge(duration) {
+            const badge = document.createElement('div');
+            badge.className = 'video-duration-badge';
+            badge.textContent = formatDuration(duration);
+            return badge;
+        }
+        
+        // 動画の秒数を取得（サムネイル表示の場合）
+        function loadVideoDuration(videoUrl, container) {
+            const tempVideo = document.createElement('video');
+            tempVideo.preload = 'metadata';
+            tempVideo.style.display = 'none';
+            
+            let removed = false; // 削除フラグ
+            
+            const cleanup = () => {
+                if (!removed && tempVideo.parentNode) {
+                    removed = true;
+                    document.body.removeChild(tempVideo);
+                }
+            };
+            
+            tempVideo.addEventListener('loadedmetadata', () => {
+                const duration = tempVideo.duration;
+                if (duration && isFinite(duration)) {
+                    const durationBadge = createDurationBadge(duration);
+                    container.appendChild(durationBadge);
+                }
+                cleanup();
+            }, { once: true });
+            
+            tempVideo.addEventListener('error', () => {
+                // エラー時は何もしない（バッジを表示しない）
+                cleanup();
+            }, { once: true });
+            
+            tempVideo.src = videoUrl;
+            document.body.appendChild(tempVideo);
+        }
+        
+        // トースト通知システム
+        function showToast(message, type = 'info') {
+            if (!message) return;
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const iconMap = {
+                success: 'check_circle',
+                error: 'error',
+                info: 'info'
+            };
+            
+            const safeMessage = escapeHtml(message);
+            toast.innerHTML = `
+                <span class="material-icons toast-icon">${iconMap[type] || 'info'}</span>
+                <span class="toast-message">${safeMessage}</span>
+                <button class="toast-close" aria-label="閉じる">
+                    <span class="material-icons" style="font-size: 18px;">close</span>
+                </button>
+            `;
+            
+            const closeButton = toast.querySelector('.toast-close');
+            const closeToast = () => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 150);
+            };
+            
+            closeButton.addEventListener('click', closeToast);
+            
+            toastContainer.appendChild(toast);
+            
+            // アニメーションをトリガー
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    toast.classList.add('show');
+                });
+            });
+            
+            // 自動的に閉じる（3-5秒）
+            const duration = type === 'error' ? 5000 : 3000;
+            setTimeout(closeToast, duration);
+        }
+        
+        // すべてのトーストをクリア
+        function clearToasts() {
+            const toasts = toastContainer.querySelectorAll('.toast');
+            toasts.forEach(toast => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 150);
+            });
         }
         
         // ページ全体ドロップ対応
@@ -1046,7 +1303,8 @@
         }
         
         async function uploadFile(file) {
-            status.textContent = `アップロード中: ${file.name}...`;
+            const safeFileName = escapeHtml(file.name);
+            showToast(`アップロード中: ${safeFileName}...`, 'info');
             
             try {
                 // 1. 署名付きURL取得
@@ -1112,15 +1370,19 @@
                 const registerResult = await registerResponse.json();
                 
                 // バックエンドで自動圧縮が実行された場合
+                const safeFileName = escapeHtml(file.name);
                 if (registerResult.compressed) {
-                    status.textContent = `アップロード・圧縮完了: ${file.name} (${formatFileSize(registerResult.original_size)} → ${formatFileSize(registerResult.compressed_size)})`;
+                    showToast(`アップロード・圧縮完了: ${safeFileName} (${formatFileSize(registerResult.original_size)} → ${formatFileSize(registerResult.compressed_size)})`, 'success');
                 } else if (registerResult.compression_error) {
-                    status.textContent = `アップロード完了: ${file.name} (圧縮エラー: ${registerResult.compression_error})`;
+                    // 圧縮エラーが発生した場合（動画の場合は既にスキップされているため、ここに来るのは画像のみ）
+                    const errorMsg = escapeHtml(registerResult.compression_error);
+                    showToast(`アップロード完了: ${safeFileName} (圧縮エラー: ${errorMsg})`, 'error');
                 } else {
-                    status.textContent = `アップロード完了: ${file.name}`;
+                    showToast(`アップロード完了: ${safeFileName}`, 'success');
                 }
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                const safeFileName = escapeHtml(file.name);
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error(error);
             }
         }
@@ -1207,6 +1469,15 @@
                             newImg.alt = safeFilename;
                             newImg.loading = 'lazy';
                             video.replaceWith(newImg);
+                            
+                            // 既存の秒数バッジを削除
+                            const existingBadge = item.querySelector('.video-duration-badge');
+                            if (existingBadge) {
+                                existingBadge.remove();
+                            }
+                            
+                            // 動画の秒数を取得してバッジを表示
+                            loadVideoDuration(content.url, item);
                         } else if (img) {
                             // 画像の場合
                             const currentSrc = img.src;
@@ -1222,6 +1493,31 @@
                                 if (currentSrc !== content.url) {
                                     videoSource.src = content.url;
                                 }
+                            }
+                            
+                            // 既存の秒数バッジを削除
+                            const existingBadge = item.querySelector('.video-duration-badge');
+                            if (existingBadge) {
+                                existingBadge.remove();
+                            }
+                            
+                            // 動画の秒数を取得してバッジを表示
+                            // 既にメタデータが読み込まれている場合のフォールバック
+                            if (video.readyState >= 1) {
+                                const duration = video.duration;
+                                if (duration && isFinite(duration)) {
+                                    const durationBadge = createDurationBadge(duration);
+                                    item.appendChild(durationBadge);
+                                }
+                            } else {
+                                // メタデータがまだ読み込まれていない場合、リスナーを追加
+                                video.addEventListener('loadedmetadata', () => {
+                                    const duration = video.duration;
+                                    if (duration && isFinite(duration)) {
+                                        const durationBadge = createDurationBadge(duration);
+                                        item.appendChild(durationBadge);
+                                    }
+                                }, { once: true });
                             }
                         }
                         
@@ -1298,6 +1594,15 @@
                 // 選択モードのUIを更新
                 updateSelectModeUI();
                 
+                // 空の状態の表示/非表示
+                if (contents.length === 0) {
+                    emptyState.style.display = 'block';
+                    gallery.style.display = 'none';
+                } else {
+                    emptyState.style.display = 'none';
+                    gallery.style.display = 'grid';
+                }
+                
             } catch (error) {
                 console.error('ギャラリー読み込みエラー:', error);
             }
@@ -1347,6 +1652,9 @@
                     img.alt = safeFilename;
                     img.loading = 'lazy';
                     div.appendChild(img);
+                    
+                    // 動画の秒数を取得してバッジを表示
+                    loadVideoDuration(content.url, div);
                 } else {
                     const video = document.createElement('video');
                     video.controls = true;
@@ -1354,6 +1662,27 @@
                     source.src = content.url;
                     source.type = safeContentType;
                     video.appendChild(source);
+                    
+                    // 動画の秒数を取得してバッジを表示
+                    // リスナーはDOMに追加する前にアタッチする必要がある（レースコンディション対策）
+                    video.addEventListener('loadedmetadata', () => {
+                        const duration = video.duration;
+                        if (duration && isFinite(duration)) {
+                            const durationBadge = createDurationBadge(duration);
+                            div.appendChild(durationBadge);
+                        }
+                    }, { once: true });
+                    
+                    // 既にメタデータが読み込まれている場合のフォールバック
+                    // readyState >= 1 (HAVE_METADATA) の場合、メタデータは既に利用可能
+                    if (video.readyState >= 1) {
+                        const duration = video.duration;
+                        if (duration && isFinite(duration)) {
+                            const durationBadge = createDurationBadge(duration);
+                            div.appendChild(durationBadge);
+                        }
+                    }
+                    
                     div.appendChild(video);
                 }
             }
@@ -1588,7 +1917,7 @@
             // ボタンを無効化
             btnBatchDelete.disabled = true;
             btnBatchDelete.innerHTML = '<span class="material-icons">hourglass_empty</span><span>削除中...</span>';
-            status.textContent = `削除中: ${count}件のコンテンツ...`;
+            showToast(`削除中: ${count}件のコンテンツ...`, 'info');
             
             const contentIds = Array.from(selectedContentIds);
             let successCount = 0;
@@ -1607,7 +1936,7 @@
                         if (!response.ok) {
                             if (response.status === 401) {
                                 authError = true;
-                                status.textContent = '認証エラー: ログインが必要です';
+                                showToast('認証エラー: ログインが必要です', 'error');
                                 showAuthForm();
                                 return;
                             }
@@ -1624,9 +1953,9 @@
                 
                 // 結果を表示
                 if (errorCount === 0) {
-                    status.textContent = `削除完了: ${successCount}件のコンテンツを削除しました`;
+                    showToast(`削除完了: ${successCount}件のコンテンツを削除しました`, 'success');
                 } else {
-                    status.textContent = `削除完了: ${successCount}件成功、${errorCount}件失敗`;
+                    showToast(`削除完了: ${successCount}件成功、${errorCount}件失敗`, 'error');
                 }
                 
                 // 選択モードを解除してギャラリーを再読み込み
@@ -1657,7 +1986,7 @@
             // ボタンを無効化
             btnBatchDownload.disabled = true;
             btnBatchDownload.innerHTML = '<span class="material-icons">hourglass_empty</span><span>ダウンロード準備中...</span>';
-            status.textContent = `ダウンロード準備中: ${count}件のコンテンツ...`;
+            showToast(`ダウンロード準備中: ${count}件のコンテンツ...`, 'info');
             
             try {
                 const response = await fetch('/api/contents/batch-download', {
@@ -1669,7 +1998,7 @@
                 
                 if (!response.ok) {
                     if (response.status === 401) {
-                        status.textContent = '認証エラー: ログインが必要です';
+                        showToast('認証エラー: ログインが必要です', 'error');
                         showAuthForm();
                         return;
                     }
@@ -1688,9 +2017,9 @@
                 document.body.removeChild(a);
                 window.URL.revokeObjectURL(url);
                 
-                status.textContent = `ダウンロード完了: ${count}件のコンテンツを含むZipファイル`;
+                showToast(`ダウンロード完了: ${count}件のコンテンツを含むZipファイル`, 'success');
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error('Batch download error:', error);
             } finally {
                 // ボタンを再有効化
@@ -1723,11 +2052,11 @@
                     throw new Error('削除に失敗しました');
                 }
                 
-                status.textContent = `削除完了: ${safeFilename}`;
+                showToast(`削除完了: ${safeFilename}`, 'success');
                 closeModal();
                 loadGallery();
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error(error);
             }
         });
@@ -1745,7 +2074,7 @@
             btnCompress.disabled = true;
             const originalAriaLabel = btnCompress.getAttribute('aria-label');
             btnCompress.setAttribute('aria-label', '圧縮中...');
-            status.textContent = `圧縮中: ${safeFilename}...`;
+            showToast(`圧縮中: ${safeFilename}...`, 'info');
             
             try {
                 const response = await fetch(`/api/contents/${currentContent.content_id}/compress`, {
@@ -1767,13 +2096,13 @@
                 }
                 
                 const result = await response.json();
-                status.textContent = `圧縮完了: ${safeFilename} (${formatFileSize(result.original_size)} → ${formatFileSize(result.compressed_size)})`;
+                showToast(`圧縮完了: ${safeFilename} (${formatFileSize(result.original_size)} → ${formatFileSize(result.compressed_size)})`, 'success');
                 
                 // ギャラリーを再読み込みしてモーダルを閉じる
                 closeModal();
                 loadGallery();
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error(error);
                 // エラー時はボタンを再有効化
                 btnCompress.disabled = false;
@@ -1810,9 +2139,9 @@
                 document.body.removeChild(a);
                 
                 const safeFilename = escapeHtml(filename || '');
-                status.textContent = `ダウンロード開始: ${safeFilename}`;
+                showToast(`ダウンロード開始: ${safeFilename}`, 'success');
             } catch (error) {
-                status.textContent = `エラー: ${error.message}`;
+                showToast(`エラー: ${error.message}`, 'error');
                 console.error(error);
             }
         });

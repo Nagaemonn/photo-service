@@ -143,11 +143,11 @@ def validate_username(username: str) -> tuple[bool, str | None]:
     戻り値: (is_valid, error_message)
     """
     if not username:
-        return False, 'Username is required'
+        return False, 'ユーザー名を入力してください'
     if len(username) < 3:
-        return False, 'Username must be at least 3 characters'
+        return False, 'ユーザー名は3文字以上である必要があります'
     if len(username) > 64:
-        return False, 'Username must be at most 64 characters'
+        return False, 'ユーザー名は64文字以下である必要があります'
     return True, None
 
 
@@ -158,11 +158,11 @@ def validate_password(password: str) -> tuple[bool, str | None, str | None]:
     warning_message: 推奨事項（エラーではない）
     """
     if not password:
-        return False, 'Password is required', None
+        return False, 'パスワードを入力してください', None
     if len(password) < 8:
-        return False, 'Password must be at least 8 characters', None
+        return False, 'パスワードは8文字以上である必要があります', None
     if len(password) > 64:
-        return False, 'Password must be at most 64 characters', None
+        return False, 'パスワードは64文字以下である必要があります', None
     
     # 英数字記号が利用可能であることを確認
     # 英字、数字、記号のいずれかが含まれているかチェック
@@ -198,7 +198,7 @@ def require_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
+            return jsonify({'error': '認証が必要です'}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -245,11 +245,11 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
 
         # 動画の場合は圧縮をサポートしない
         if content_type.startswith('video/'):
-            return {'success': False, 'error': 'Video compression is not supported. Only images can be compressed.'}
+            return {'success': False, 'error': '動画の圧縮はサポートされていません。画像のみ圧縮可能です。'}
         
         # 画像以外のコンテンツタイプはサポートしない
         if not content_type.startswith('image/'):
-            return {'success': False, 'error': 'Unsupported content type for compression'}
+            return {'success': False, 'error': 'このコンテンツタイプは圧縮をサポートしていません'}
 
         # S3からファイルをダウンロード
         s3_client.download_file(BUCKET_NAME, s3_key, temp_input_path)
@@ -309,7 +309,7 @@ def perform_compression(content_id: str, s3_key: str, content_type: str, upload_
 
     except Exception as e:
         print(f"Compression error: {str(e)}")
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': '圧縮処理中にエラーが発生しました'}
     finally:
         # 一時ファイルを削除
         if temp_input_path and os.path.exists(temp_input_path):
@@ -421,7 +421,7 @@ def reject_http():
     
     # HTTPリクエスト（かつHTTPSに転送されていない）を拒否
     if request.scheme == 'http' and not is_secure:
-        return jsonify({'error': 'HTTPS required'}), 403
+        return jsonify({'error': 'HTTPSが必要です'}), 403
 
 @app.after_request
 def add_security_headers(response):
@@ -482,7 +482,7 @@ def register():
             ExpressionAttributeValues={':un': username}
         )
         if response['Items']:
-            return jsonify({'error': 'Username already exists'}), 400
+            return jsonify({'error': 'このユーザー名は既に使用されています'}), 400
         
         # ユーザー作成
         user_id = str(uuid.uuid4())
@@ -515,7 +515,7 @@ def register():
         
     except Exception as e:
         print(f"Registration error: {str(e)}")
-        return jsonify({'error': 'Registration failed'}), 500
+        return jsonify({'error': '登録に失敗しました'}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -526,7 +526,7 @@ def login():
         password = data.get('password', '')
         
         if not username or not password:
-            return jsonify({'error': 'Username and password are required'}), 400
+            return jsonify({'error': 'ユーザー名とパスワードを入力してください'}), 400
         
         # DynamoDBからユーザー情報を取得
         response = users_table.scan(
@@ -535,13 +535,13 @@ def login():
         )
         
         if not response['Items']:
-            return jsonify({'error': 'Invalid username or password'}), 401
+            return jsonify({'error': 'ユーザー名またはパスワードが正しくありません'}), 401
         
         user = response['Items'][0]
         
         # パスワード検証
         if not verify_password(password, user['password_hash']):
-            return jsonify({'error': 'Invalid username or password'}), 401
+            return jsonify({'error': 'ユーザー名またはパスワードが正しくありません'}), 401
         
         # セッションに保存（永続化）
         session.permanent = True
@@ -555,7 +555,7 @@ def login():
         
     except Exception as e:
         print(f"Login error: {str(e)}")
-        return jsonify({'error': 'Login failed'}), 500
+        return jsonify({'error': 'ログインに失敗しました'}), 500
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -567,13 +567,13 @@ def logout():
 def get_current_user():
     """現在のユーザー情報取得"""
     if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
+        return jsonify({'error': '認証されていません'}), 401
     
     # usernameが存在しない場合に備えて安全にアクセス
     username = session.get('username')
     if not username:
         # usernameが存在しない場合は認証エラーとして扱う
-        return jsonify({'error': 'Not authenticated'}), 401
+        return jsonify({'error': '認証されていません'}), 401
     
     return jsonify({
         'user_id': session['user_id'],
@@ -586,7 +586,7 @@ def delete_user():
     """ユーザーアカウント削除（全コンテンツも削除）"""
     user_id = session.get('user_id')
     if not user_id:
-        return jsonify({'error': 'Not authenticated'}), 401
+        return jsonify({'error': '認証されていません'}), 401
     
     errors = []
     
@@ -690,7 +690,7 @@ def delete_user():
     except Exception as e:
         error_msg = f"User deletion error: {str(e)}"
         print(f"Error: {error_msg}")
-        return jsonify({'error': 'User deletion failed', 'details': [error_msg]}), 500
+        return jsonify({'error': 'アカウント削除に失敗しました', 'details': [error_msg]}), 500
 
 @app.route('/api/presigned-url', methods=['POST'])
 @require_auth
@@ -734,7 +734,7 @@ def register_content():
     required_fields = ['filename', 'content_id', 's3_key', 'content_type', 'file_size']
     missing_fields = [field for field in required_fields if field not in data or data[field] is None]
     if missing_fields:
-        return jsonify({'error': f'Missing required fields: {", ".join(missing_fields)}'}), 400
+        return jsonify({'error': f'必須フィールドが不足しています: {", ".join(missing_fields)}'}), 400
     
     filename = data['filename']
     s3_key = data['s3_key']
@@ -771,7 +771,7 @@ def register_content():
             # S3削除が失敗してもログに記録して続行（孤立オブジェクトはライフサイクルポリシーで後から削除される）
             print(f"Warning: Failed to delete orphaned S3 object {s3_key} after duplicate detection: {s3_error}")
         
-        return jsonify({'error': 'File with the same name already exists'}), 409
+        return jsonify({'error': '同じファイル名のファイルが既に存在します'}), 409
     
     # アトミックな挿入: content_idが存在しないことを条件として挿入
     # これにより、同じcontent_idでの重複挿入を防ぐ
@@ -791,7 +791,7 @@ def register_content():
                 s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
             except Exception as s3_error:
                 print(f"Warning: Failed to delete orphaned S3 object {s3_key} after conditional check failure: {s3_error}")
-            return jsonify({'error': 'Content with the same ID already exists'}), 409
+            return jsonify({'error': '同じIDのコンテンツが既に存在します'}), 409
         else:
             # その他のエラー
             raise
@@ -829,7 +829,7 @@ def register_content():
                 except Exception as s3_error:
                     print(f"Warning: Failed to delete orphaned S3 object {s3_key} after duplicate detection: {s3_error}")
                 
-                return jsonify({'error': 'File with the same name already exists'}), 409
+                return jsonify({'error': '同じファイル名のファイルが既に存在します'}), 409
             except Exception as delete_error:
                 # 削除に失敗した場合はログに記録（既に挿入されているため）
                 print(f"Warning: Failed to delete duplicate item {data['content_id']}: {delete_error}")
@@ -878,14 +878,15 @@ def register_content():
             print(f"Warning: Thumbnail generation failed for {data['content_id']}: {thumbnail_result.get('error')}")
             result['thumbnail_generation_error'] = thumbnail_result.get('error', 'Unknown error')
     
-    # 自動圧縮が有効な場合、圧縮処理を実行
+    # 自動圧縮が有効な場合、圧縮処理を実行（動画の場合はスキップ）
     auto_compress = data.get('auto_compress', False)
+    content_type = data['content_type']
     
-    if auto_compress:
+    if auto_compress and not content_type.startswith('video/'):
         compression_result = perform_compression(
             data['content_id'],
             data['s3_key'],
-            data['content_type'],
+            content_type,
             upload_date
         )
         if compression_result.get('success'):
@@ -893,6 +894,7 @@ def register_content():
             result['original_size'] = compression_result['original_size']
             result['compressed_size'] = compression_result['compressed_size']
         else:
+            # 動画の場合は圧縮エラーを返さない（既にスキップされているため）
             result['compression_error'] = compression_result.get('error', 'Unknown error')
     
     return jsonify(result)
@@ -986,7 +988,7 @@ def delete_content(content_id):
 
         if not response['Items']:
             # content_id は存在するが別ユーザーのものである可能性も含めて Not Found と扱う
-            return jsonify({'error': 'Content not found'}), 404
+            return jsonify({'error': 'コンテンツが見つかりません'}), 404
 
         item = response['Items'][0]
         s3_key = item['s3_key']
@@ -1020,7 +1022,8 @@ def delete_content(content_id):
 
         return jsonify({'status': 'success'}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Content deletion error: {str(e)}")
+        return jsonify({'error': 'コンテンツの削除に失敗しました'}), 500
 
 
 @app.route('/api/contents/<content_id>/download', methods=['GET'])
@@ -1040,7 +1043,7 @@ def download_content(content_id):
         )
 
         if not response['Items']:
-            return jsonify({'error': 'Content not found'}), 404
+            return jsonify({'error': 'コンテンツが見つかりません'}), 404
 
         item = response['Items'][0]
         s3_key = item['s3_key']
@@ -1062,7 +1065,8 @@ def download_content(content_id):
             'filename': filename
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Content download error: {str(e)}")
+        return jsonify({'error': 'ダウンロードURL取得に失敗しました'}), 500
 
 
 @app.route('/api/contents/<content_id>/compress', methods=['POST'])
@@ -1085,13 +1089,13 @@ def compress_content(content_id):
         )
 
         if not response['Items']:
-            return jsonify({'error': 'Content not found'}), 404
+            return jsonify({'error': 'コンテンツが見つかりません'}), 404
 
         item = response['Items'][0]
         
         # 既に圧縮済みの場合はエラー
         if item.get('compressed', False):
-            return jsonify({'error': 'Content is already compressed'}), 400
+            return jsonify({'error': 'コンテンツは既に圧縮されています'}), 400
 
         s3_key = item['s3_key']
         content_type = item.get('content_type', '')
@@ -1101,7 +1105,10 @@ def compress_content(content_id):
         compression_result = perform_compression(content_id, s3_key, content_type, upload_date)
         
         if not compression_result.get('success'):
-            return jsonify({'error': compression_result.get('error', 'Compression failed')}), 500
+            # perform_compressionは既に日本語のエラーメッセージを返すため、
+            # 英語の文字列マッチングは不要（デッドコードを削除）
+            error_msg = compression_result.get('error', '圧縮に失敗しました')
+            return jsonify({'error': error_msg}), 500
 
         return jsonify({
             'status': 'success',
@@ -1111,7 +1118,7 @@ def compress_content(content_id):
 
     except Exception as e:
         print(f"Compression error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': '圧縮処理中にエラーが発生しました'}), 500
 
 def cleanup_temp_files_after_delay(zip_path, dir_path, max_retries=30, retry_interval=2):
     """
@@ -1179,14 +1186,14 @@ def batch_download_contents():
         user_id = session['user_id']  # セッションから取得
         data = request.get_json()
         if data is None:
-            return jsonify({'error': 'Invalid JSON or missing Content-Type: application/json'}), 400
+            return jsonify({'error': '無効なJSONまたはContent-Type: application/jsonが不足しています'}), 400
         content_ids = data.get('content_ids', [])
         
         if not content_ids:
-            return jsonify({'error': 'No content IDs provided'}), 400
+            return jsonify({'error': 'コンテンツIDが提供されていません'}), 400
         
         if not isinstance(content_ids, list):
-            return jsonify({'error': 'content_ids must be a list'}), 400
+            return jsonify({'error': 'content_idsはリストである必要があります'}), 400
         
         # 一時ディレクトリを作成
         temp_dir = tempfile.mkdtemp()
@@ -1259,7 +1266,7 @@ def batch_download_contents():
                     os.rmdir(temp_dir)
                 except Exception:
                     pass
-            return jsonify({'error': 'No files could be downloaded'}), 400
+            return jsonify({'error': 'ダウンロードできるファイルがありません'}), 400
         
         # Zipファイルをレスポンスとして返送
         # send_file()の後にクリーンアップを開始することで、
@@ -1292,7 +1299,7 @@ def batch_download_contents():
                 os.rmdir(temp_dir)
         except Exception:
             pass
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': '一括ダウンロードに失敗しました'}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
