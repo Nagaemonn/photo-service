@@ -1687,49 +1687,18 @@
                             // video要素をimg要素に置き換え
                             const safeFilename = escapeHtml(content.filename || '');
                             const newImg = document.createElement('img');
-                            // 優先度を設定（横5枚 × 縦3行 = 15枚）
-                            if (index < 15) {
-                                newImg.fetchPriority = 'high';
-                            } else {
-                                newImg.fetchPriority = 'low';
-                            }
-                            // 遅延読み込み用にdata-srcに保存
+                            // すべての画像をlazy loadingで統一
                             newImg.dataset.src = content.thumbnail_url;
                             newImg.alt = safeFilename;
-                            // 最初の15枚はeager loading、それ以降はlazy loading
-                            if (index >= 15) {
-                                newImg.loading = 'lazy';
-                            }
-                            // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
-                            if (index < 15) {
-                                // loadingクラスを追加（新規作成時と一貫性を保つ）
-                                item.classList.add('loading');
-                                // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
-                                newImg.addEventListener('load', () => {
-                                    // 画像が完全に読み込まれたことを確認
-                                    if (newImg.complete && newImg.naturalWidth > 0 && newImg.naturalHeight > 0) {
-                                        newImg.dataset.loaded = 'true';
-                                        item.classList.remove('loading');
-                                    }
-                                }, { once: true });
-                                newImg.src = content.thumbnail_url;
-                                // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                                if (newImg.complete && newImg.naturalWidth > 0 && newImg.naturalHeight > 0) {
-                                    newImg.dataset.loaded = 'true';
-                                    item.classList.remove('loading');
-                                }
-                            } else {
-                                newImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
-                                item.classList.add('loading');
-                                // プレースホルダーSVGのloadイベントでは何もしない
-                                // 実際の画像読み込みはloadImage()関数内で処理される
-                            }
+                            newImg.loading = 'lazy';
+                            newImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                            item.classList.add('loading');
                             // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
                             applyExifOrientation(newImg, content.thumbnail_url, false);
                             video.replaceWith(newImg);
                             
-                            // Intersection Observerで監視（最初の15枚以外）
-                            if (index >= 15 && imageObserver) {
+                            // Intersection Observerで監視
+                            if (imageObserver) {
                                 imageObserver.observe(newImg);
                             }
                             
@@ -1746,82 +1715,33 @@
                             const currentSrc = img.src;
                             const newSrc = content.thumbnail_url || content.url;
                             if (currentSrc !== newSrc) {
-                                // 優先度を設定（横5枚 × 縦3行 = 15枚）
-                                if (index < 15) {
-                                    img.fetchPriority = 'high';
-                                } else {
-                                    img.fetchPriority = 'low';
-                                }
-                                // 遅延読み込み用にdata-srcに保存
+                                // すべての画像をlazy loadingで統一
                                 img.dataset.src = newSrc;
-                                // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
-                                if (index < 15) {
-                                    // loadingクラスを追加（新規作成時と一貫性を保つ）
-                                    item.classList.add('loading');
-                                    // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
-                                    img.addEventListener('load', () => {
-                                        // 画像が完全に読み込まれたことを確認
-                                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                                            img.dataset.loaded = 'true';
-                                            item.classList.remove('loading');
-                                        }
-                                    }, { once: true });
-                                    img.src = newSrc;
-                                    // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                                        img.dataset.loaded = 'true';
-                                        item.classList.remove('loading');
-                                    }
-                                } else {
-                                    // 遅延読み込み対象の場合、dataset.loadedをリセット
-                                    // 以前に読み込まれた画像が位置変更で遅延読み込み対象になった場合に対応
-                                    delete img.dataset.loaded;
-                                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
-                                    item.classList.add('loading');
-                                    // Intersection Observerで監視
-                                    if (imageObserver) {
-                                        imageObserver.observe(img);
-                                    }
+                                img.loading = 'lazy';
+                                // 既に読み込まれている場合はリセット
+                                delete img.dataset.loaded;
+                                img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
+                                item.classList.add('loading');
+                                // Intersection Observerで監視
+                                if (imageObserver) {
+                                    imageObserver.observe(img);
                                 }
                                 // EXIF Orientation処理を適用（画像が更新された場合）
                                 const isCompressed = content.compressed === true;
                                 applyExifOrientation(img, newSrc, isCompressed);
                             } else {
-                                // URLが同じ場合（順序変更のみ）でも、上15件に入った場合はloadingクラスを適切に処理
-                                if (index < 15) {
-                                    // 既に読み込まれている画像の場合、loadingクラスを削除
-                                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                                        img.dataset.loaded = 'true';
-                                        item.classList.remove('loading');
-                                        // 優先度を更新
-                                        img.fetchPriority = 'high';
-                                    } else {
-                                        // まだ読み込まれていない場合、loadingクラスを追加して読み込み開始
-                                        item.classList.add('loading');
-                                        img.fetchPriority = 'high';
-                                        img.addEventListener('load', () => {
-                                            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                                                img.dataset.loaded = 'true';
-                                                item.classList.remove('loading');
-                                            }
-                                        }, { once: true });
-                                        // srcが設定されていない場合は設定
-                                        if (!img.src || img.src === 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E') {
-                                            img.src = newSrc;
-                                        }
-                                    }
+                                // URLが同じ場合（順序変更のみ）
+                                // 既に読み込まれている画像の場合、loadingクラスを削除
+                                if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0 && img.dataset.loaded === 'true') {
+                                    item.classList.remove('loading');
                                 } else {
-                                    // 15件以降に移動した場合、遅延読み込みに切り替え
-                                    if (img.dataset.loaded) {
-                                        delete img.dataset.loaded;
-                                    }
+                                    // まだ読み込まれていない、またはリセットされた場合
+                                    // data-srcが設定されていない場合は設定
                                     if (!img.dataset.src) {
                                         img.dataset.src = newSrc;
                                     }
-                                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
-                                    item.classList.add('loading');
-                                    img.fetchPriority = 'low';
                                     img.loading = 'lazy';
+                                    item.classList.add('loading');
                                     // Intersection Observerで監視
                                     if (imageObserver) {
                                         imageObserver.observe(img);
@@ -1875,6 +1795,12 @@
                         const clonedItem = item.cloneNode(true);
                         item.parentNode.replaceChild(clonedItem, item);
                         const updatedItem = clonedItem;
+                        
+                        // クローン後、Intersection Observerで監視（まだ監視されていない場合）
+                        const clonedImg = updatedItem.querySelector('img[loading="lazy"]');
+                        if (clonedImg && !clonedImg.dataset.loaded && imageObserver) {
+                            imageObserver.observe(clonedImg);
+                        }
                         
                         // 新しいクリックイベントリスナーを追加
                         updatedItem.addEventListener('click', (e) => {
@@ -1999,92 +1925,36 @@
             
             if (contentType.startsWith('image/')) {
                 const img = document.createElement('img');
-                // 最初の15枚の画像に優先度を設定（横5枚 × 縦3行 = 15枚）
-                div.classList.add('loading');  // スケルトンローディング用のクラスを追加（全画像に適用）
-                if (index < 15) {
-                    img.fetchPriority = 'high';
-                } else {
-                    img.fetchPriority = 'low';
-                }
-                // 遅延読み込み用にdata-srcに保存（最初の15枚には不要）
-                if (index >= 15) {
-                    img.dataset.src = content.url;
-                }
+                // すべての画像をlazy loadingで統一
+                div.classList.add('loading');  // スケルトンローディング用のクラスを追加
+                img.dataset.src = content.url;
                 img.alt = safeFilename;
-                // 最初の15枚はeager loading、それ以降はlazy loading
-                if (index >= 15) {
-                    img.loading = 'lazy';
-                }
-                // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
-                if (index < 15) {
-                    // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
-                    img.addEventListener('load', () => {
-                        // 画像が完全に読み込まれたことを確認
-                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                            img.dataset.loaded = 'true';
-                            div.classList.remove('loading');
-                        }
-                    }, { once: true });
-                    img.src = content.url;
-                    // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                        img.dataset.loaded = 'true';
-                        div.classList.remove('loading');
-                    }
-                } else {
-                    // プレースホルダーとして空のsrcを設定
-                    // プレースホルダーSVGのloadイベントでは何もしない
-                    // 実際の画像読み込みはloadImage()関数内で処理される
-                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
-                }
+                img.loading = 'lazy';
+                img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
                 // EXIF Orientation処理を適用
                 applyExifOrientation(img, content.url, isCompressed);
                 div.appendChild(img);
+                // Intersection Observerで監視（setupLazyLoadingで一括監視されるが、即座に監視を開始）
+                if (imageObserver) {
+                    imageObserver.observe(img);
+                }
             } else if (contentType.startsWith('video/')) {
                 // サムネイルがあればサムネイルを表示、なければ動画タグを表示
                 if (content.thumbnail_url) {
                     const img = document.createElement('img');
-                    // 最初の15枚の画像に優先度を設定（横5枚 × 縦3行 = 15枚）
-                    div.classList.add('loading');  // スケルトンローディング用のクラスを追加（全画像に適用）
-                    if (index < 15) {
-                        img.fetchPriority = 'high';
-                    } else {
-                        img.fetchPriority = 'low';
-                    }
-                    // 遅延読み込み用にdata-srcに保存（最初の15枚には不要）
-                    if (index >= 15) {
-                        img.dataset.src = content.thumbnail_url;
-                    }
+                    // すべての画像をlazy loadingで統一
+                    div.classList.add('loading');  // スケルトンローディング用のクラスを追加
+                    img.dataset.src = content.thumbnail_url;
                     img.alt = safeFilename;
-                    // 最初の15枚はeager loading、それ以降はlazy loading
-                    if (index >= 15) {
-                        img.loading = 'lazy';
-                    }
-                    // 最初の15枚は即座に読み込み、それ以降はIntersection Observerで制御
-                    if (index < 15) {
-                        // イベントリスナーを先に追加（キャッシュ済み画像のloadイベントを確実にキャッチ）
-                        img.addEventListener('load', () => {
-                            // 画像が完全に読み込まれたことを確認
-                            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                                img.dataset.loaded = 'true';
-                                div.classList.remove('loading');
-                            }
-                        }, { once: true });
-                        img.src = content.thumbnail_url;
-                        // 既に読み込まれている場合（キャッシュ済み）のフォールバック
-                        if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                            img.dataset.loaded = 'true';
-                            div.classList.remove('loading');
-                        }
-                    } else {
-                        // プレースホルダーとして空のsrcを設定
-                        // プレースホルダーSVGのloadイベントでは何もしない
-                        // 実際の画像読み込みはloadImage()関数内で処理される
-                        img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
-                    }
+                    img.loading = 'lazy';
+                    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"%3E%3C/svg%3E';
                     // 動画サムネイルは圧縮処理されていないため、EXIF Orientation処理を適用
                     applyExifOrientation(img, content.thumbnail_url, false);
                     div.appendChild(img);
+                    // Intersection Observerで監視（setupLazyLoadingで一括監視されるが、即座に監視を開始）
+                    if (imageObserver) {
+                        imageObserver.observe(img);
+                    }
                     
                     // 動画の秒数を取得してバッジを表示
                     loadVideoDuration(content.url, div);
